@@ -4272,7 +4272,7 @@ var WSD = (function () {
       self.exists = {};
       return loadFirebase().then(function (fb) {
         self.db = fb.firestore();
-        self.base = 'users/' + user.uid;
+        self.base = 'users/' + user.uid + '/sync';
         var refs = [];
         for (var k = 0; k < SHARDS; k++) refs.push(self.db.doc(self.base + '/p' + k));
         refs.push(self.db.doc(self.base + '/days'));
@@ -4384,7 +4384,7 @@ var WSD = (function () {
         return ref.set({ p: shardAll(k) }).then(function () { self.exists['p' + k] = true; }, restore);
       }
       return ref.update(updates).catch(function (e) {
-        if (e && (e.code === 'invalid_argument' || e.code === 'not-found')) {
+        if (e && (e.code === 'invalid_argument' || e.code === 'invalid-argument' || e.code === 'not-found')) {
           // the document may have disappeared; write the whole shard instead
           return ref.set({ p: shardAll(k) });
         }
@@ -4396,7 +4396,7 @@ var WSD = (function () {
       var self = this;
       this.lastErr = code || (e && e.message) || 'unknown';
       try { console.warn('[sync] write failed', e); } catch (x) { /* ignore */ }
-      if (code === 'invalid_argument' || code === 'not_granted' || code === 'revoked' || code === 'capability_disabled' || code === 'capability_removed' || code === 'transform_error' || code === 'permission-denied' || code === 'unauthenticated') {
+      if (code === 'invalid_argument' || code === 'invalid-argument' || code === 'not_granted' || code === 'revoked' || code === 'capability_disabled' || code === 'capability_removed' || code === 'transform_error' || code === 'permission-denied' || code === 'unauthenticated') {
         this.state = 'local';
         setSync(canLocal ? (fbUser ? 'error' : 'local-only') : 'nostore');
         return;
@@ -4493,6 +4493,7 @@ var WSD = (function () {
     var c = Cloud.lastErr;
     if (!c) return 'しばらくすると自動でやり直します。';
     var h = {
+      'invalid-argument': '保存先の指定が不正です（アプリ側の不具合）。最新版の index.html に置き換えてください。',
       'permission-denied': 'Firestore のルールが公開されていないか、users/{uid} への書き込みを許可していません。',
       'unauthenticated': 'ログインの有効期限が切れています。いちどログアウトして、もう一度ログインしてください。',
       'unavailable': '通信できません。電波の良い場所で、しばらくしてからやり直します。',
