@@ -4214,7 +4214,10 @@ var WSD = (function () {
       return fb.auth().signInWithPopup(provider).catch(function (e) {
         var c = e && e.code;
         if (c === 'auth/popup-blocked') return fb.auth().signInWithRedirect(provider);
-        if (c !== 'auth/popup-closed-by-user' && c !== 'auth/cancelled-popup-request') toast('ログインできませんでした');
+        if (c !== 'auth/popup-closed-by-user' && c !== 'auth/cancelled-popup-request') {
+          Cloud.lastErr = c || 'unknown';
+          toast('ログインできませんでした（' + (c || 'unknown') + '）' + (c === 'auth/unauthorized-domain' ? ' Firebaseの承認済みドメインにこのサイトのドメインを追加してください' : ''));
+        }
       });
     }, function () { toast('ログインの準備ができませんでした。通信状態を確認してください'); });
   }
@@ -4255,7 +4258,7 @@ var WSD = (function () {
       this.timer = setTimeout(function () { self.timer = 0; self.flush(); }, ms == null ? 2500 : ms);
       if (!this.busy) setSync('pending');
     },
-    initSeq: 0,
+    initSeq: 0, lastErr: '', lastPull: 0,
     init: function () {
       var self = this;
       var seq = ++self.initSeq;
@@ -4286,7 +4289,9 @@ var WSD = (function () {
       }).catch(function (e) {
         if (seq !== self.initSeq) return false;
         self.state = 'local';
-        setSync(canLocal ? 'local' : 'nostore');
+        self.lastErr = (e && (e.code || e.message)) || 'unknown';
+        try { console.warn('[sync] init failed', e); } catch (x) { /* ignore */ }
+        setSync(canLocal ? 'error' : 'nostore');
         if (e && e.code === 'unavailable') {
           setTimeout(function () { if (fbUser && self.state === 'local') self.init().then(self.onChange || function () {}); }, 30000);
         }
@@ -4302,6 +4307,29 @@ var WSD = (function () {
           throw e;
         });
       }
+    },
+    /* pull what other devices wrote while this page stayed open */
+    pull: function (force) {
+      var self = this;
+      if (this.state !== 'on' || this.busy || !fbUser) return Promise.resolve(false);
+      var now = Date.now();
+      if (!force && now - this.lastPull < 15000) return Promise.resolve(false);
+      this.lastPull = now;
+      var seq = this.initSeq;
+      var chain = this.hasWork() ? this.flush() : Promise.resolve();
+      return Promise.resolve(chain).then(function () {
+        var refs = [];
+        for (var k = 0; k < SHARDS; k++) refs.push(self.db.doc(self.base + '/p' + k));
+        refs.push(self.db.doc(self.base + '/days'));
+        refs.push(self.db.doc(self.base + '/meta'));
+        refs.push(self.db.doc(self.base + '/lists'));
+        return Promise.all(refs.map(function (r) { return r.get(); }));
+      }).then(function (snaps) {
+        if (seq !== self.initSeq || self.state !== 'on') return false;
+        var changed = mergeRemote(snaps);
+        if (self.hasWork()) self.schedule(800);
+        return changed;
+      }).catch(function () { return false; });
     },
     flush: function () {
       var self = this;
@@ -4366,9 +4394,11 @@ var WSD = (function () {
     fail: function (e) {
       var code = e && e.code;
       var self = this;
+      this.lastErr = code || (e && e.message) || 'unknown';
+      try { console.warn('[sync] write failed', e); } catch (x) { /* ignore */ }
       if (code === 'invalid_argument' || code === 'not_granted' || code === 'revoked' || code === 'capability_disabled' || code === 'capability_removed' || code === 'transform_error' || code === 'permission-denied' || code === 'unauthenticated') {
         this.state = 'local';
-        setSync(canLocal ? 'local-only' : 'nostore');
+        setSync(canLocal ? (fbUser ? 'error' : 'local-only') : 'nostore');
         return;
       }
       setSync('error');
@@ -4459,6 +4489,19 @@ var WSD = (function () {
     var st = $('#set-status');
     if (st) st.textContent = syncText();
   }
+  function errHint() {
+    var c = Cloud.lastErr;
+    if (!c) return 'しばらくすると自動でやり直します。';
+    var h = {
+      'permission-denied': 'Firestore のルールが公開されていないか、users/{uid} への書き込みを許可していません。',
+      'unauthenticated': 'ログインの有効期限が切れています。いちどログアウトして、もう一度ログインしてください。',
+      'unavailable': '通信できません。電波の良い場所で、しばらくしてからやり直します。',
+      'not-found': 'Firestore のデータベースがまだ作成されていません。',
+      'failed-precondition': 'Firestore のデータベースが作成されていないか、設定が足りません。',
+      'resource-exhausted': '無料枠の上限に達しました。しばらくしてからやり直します。'
+    }[c] || '';
+    return '（原因コード: ' + c + '）' + h;
+  }
   function syncText() {
     switch (syncState) {
       case 'on': case 'pending': case 'saving':
@@ -4468,7 +4511,7 @@ var WSD = (function () {
       case 'local-only':
         return 'このページではアカウントへの保存が使えないため、進捗はこのブラウザに保存しています。ほかの端末に移すときはバックアップを使ってください。';
       case 'error':
-        return 'アカウントへの保存がうまくいっていません。このブラウザには保存済みで、しばらくすると自動でやり直します。';
+        return 'アカウントへの保存がうまくいっていません。このブラウザには保存済みです。' + errHint();
       case 'nostore':
         return 'このブラウザでは保存が使えません（プライベートブラウズなど）。学習を終える前にバックアップを書き出してください。';
       default:
@@ -6726,8 +6769,18 @@ var WSD = (function () {
   });
   view.addEventListener('pointercancel', function () { swipe = null; });
 
+  function pullNow() {
+    if (!M) return;
+    Cloud.pull().then(function (changed) { if (changed && Cloud.onChange) Cloud.onChange(true); });
+  }
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden' && M) { saveLocal(); Cloud.flush(); }
+    else if (document.visibilityState === 'visible') pullNow();
+  });
+  window.addEventListener('focus', pullNow);
+  window.addEventListener('online', function () {
+    if (Cloud.state === 'local' && fbUser && M) Cloud.init().then(function (c) { if (Cloud.onChange) Cloud.onChange(c); });
+    else pullNow();
   });
   window.addEventListener('pagehide', function () { if (M) saveLocal(); });
   // progress made in another tab of this page shows up here too
