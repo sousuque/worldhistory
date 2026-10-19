@@ -1020,6 +1020,22 @@ button.rel:hover { border-color: var(--link); }
 .q-key { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); pointer-events: none; }
 .search-box input:focus + .q-key { display: none; }
 .clear-q { flex: none; min-height: 54px; padding: 0 22px; }
+/* × inside the print search bar, at its right end */
+.q-x {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 999px;
+  background: var(--hover);
+  color: var(--ink-3);
+  font-size: 18px;
+  line-height: 1;
+}
+.q-x:hover { background: var(--hover-2); color: var(--ink); }
+.q-x[hidden] { display: none; }
 @media (hover: none) and (pointer: coarse) { .q-key { display: none; } .search-box input { padding-right: 18px; } }
 .search-info { margin: 16px 0 8px; font-size: 13px; color: var(--ink-3); }
 .gl-bar { display: flex; flex-wrap: wrap; gap: 0 32px; margin-top: 4px; }
@@ -1419,8 +1435,8 @@ mark { background: var(--mark); color: var(--ink); padding: 0 1px; }
   .pr-h2 { font-size: 19px; }
   .pr-box { padding: 8px 12px; }
   .pr-bar { gap: 6px; }
-  .pr-bar-b { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1.3fr; }
-  .pr-bar-b .btn { padding: 0 8px; }
+  .pr-bar-b { width: 100%; display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 5px; }
+  .pr-bar-b .btn { padding: 0 4px; font-size: 12.5px; }
   .pr-bar-b kbd { display: none; }
   .pr-pager { grid-template-columns: minmax(0, 1fr); }
   .pr-pager .btn.nx { align-items: flex-start; text-align: left; }
@@ -6266,20 +6282,17 @@ var WSD = (function () {
   }
 
   /* ---------- list and search ---------- */
-  function prPlaceholder() { return PS.scope === 'all' ? '本文・答えも含めて検索' : 'スケジュールの語句で検索'; }
+  /* the list shows what the last 検索 found (PS.q); typing alone changes nothing until 検索 or Enter.
+     The search always covers the whole print: schedule, text and answers. */
   function renderPrints(opts) {
     printsLoad();
     state.view = 'prints'; setNav('home');
     show('<div class="wrap prints"><p class="eyebrow" lang="en">PRINTS</p>' +
       '<div class="dk-title"><h1 class="page-h">プリントで学習</h1><div class="tools"><button type="button" class="link" data-act="home">ホームへ</button></div></div>' +
-      '<div class="search-box"><label class="sr-only" for="pq">プリントを検索</label>' +
-      '<div class="q-wrap"><input id="pq" type="search" value="' + esc(PS.q) + '" placeholder="' + prPlaceholder() + '" autocomplete="off" spellcheck="false" enterkeyhint="search" aria-keyshortcuts="/">' +
-      '<kbd class="q-key" aria-hidden="true">/</kbd></div>' +
-      '<button type="button" class="btn clear-q" data-act="pr-clear" id="pr-clear"' + (PS.q ? '' : ' disabled') + '>クリア</button></div>' +
-      '<div class="gl-bar"><div class="opt"><span class="opt-l" id="pr-sc-l">検索の対象</span><div class="seg" role="group" aria-labelledby="pr-sc-l">' +
-      [['sched', '本時のスケジュール（Ａ〜Ｄ）'], ['all', 'プリント全体']].map(function (o) {
-        return '<button type="button" data-act="pr-scope" data-val="' + o[0] + '" aria-pressed="' + (PS.scope === o[0]) + '">' + o[1] + '</button>';
-      }).join('') + '</div></div></div>' +
+      '<form class="search-box" data-form="pr-search" role="search"><label class="sr-only" for="pq">プリントを検索</label>' +
+      '<div class="q-wrap"><input id="pq" type="text" value="' + esc(PS.q) + '" placeholder="語句を入れて「検索」（本文・答えも対象）" autocomplete="off" spellcheck="false" enterkeyhint="search" aria-keyshortcuts="/">' +
+      '<button type="button" class="q-x" data-act="pr-clear" id="pr-clear" aria-label="検索バーをクリア" title="クリア"' + (PS.q ? '' : ' hidden') + '>×</button></div>' +
+      '<button type="submit" class="btn primary clear-q">検索</button></form>' +
       '<p class="search-info" id="pr-info" role="status"></p>' +
       '<ol class="pr-grid" id="pr-list"></ol></div>', opts);
     prRunSearch();
@@ -6331,21 +6344,18 @@ var WSD = (function () {
   function prRunSearch() {
     var list = $('#pr-list'), info = $('#pr-info');
     if (!list || !PR) return;
-    var r = prFind(PS.q, PS.scope), n = r.items.length;
+    var r = prFind(PS.q, 'all'), n = r.items.length;
     PS.found = r.words.length && n ? r.items.map(function (it) { return it.p.no; }) : null;
     var pos =r.words.filter(function (w) { return !w.neg; }), neg = r.words.filter(function (w) { return w.neg; });
     var head;
     if (!r.words.length) head = PR.length ? '全<b>' + fmt(PR.length) + '</b>枚（No.' + PR[0].no + '〜No.' + PR[PR.length - 1].no + '）' : 'プリントのデータがありません';
     else {
-      head = (pos.length ? pos.map(function (w) { return '「' + esc(w.raw) + '」'; }).join('') + (PS.scope === 'all' ? 'をプリントのどこかに含む' : 'を本時のスケジュールに含む') : '') +
+      head = (pos.length ? pos.map(function (w) { return '「' + esc(w.raw) + '」'; }).join('') + 'をプリントのどこかに含む' : '') +
         (neg.length ? (pos.length ? '・' : '') + neg.map(function (w) { return '「' + esc(w.raw) + '」'; }).join('') + 'を除く' : '') +
         'プリント　<b>' + fmt(n) + '</b>枚';
     }
     if (info) info.innerHTML = head;
-    var wider = !n && PS.scope === 'sched' && pos.length ? prFind(PS.q, 'all').items.length : 0;
-    list.innerHTML = n ? r.items.map(prCardHTML).join('') :
-      '<li class="pr-none"><p>' + (wider ? '本時のスケジュールには見つかりませんでした。プリントの本文には<b>' + wider + '</b>枚あります。' : '見つかりませんでした。') + '</p>' +
-      (wider ? '<button type="button" class="btn sm" data-act="pr-scope" data-val="all">プリント全体から探す</button>' : '') + '</li>';
+    list.innerHTML = n ? r.items.map(prCardHTML).join('') : '<li class="pr-none"><p>見つかりませんでした。</p></li>';
   }
 
   /* ---------- reading a print ---------- */
@@ -6394,9 +6404,10 @@ var WSD = (function () {
       (next ? '<button type="button" class="btn nx" data-act="print-open" data-no="' + next.no + '"><span class="pg-d">No.' + next.no + ' →</span><span class="pg-t">' + esc(prTitle(next)) + '</span></button>' : '<span></span>') +
       '</nav>' + (hitNav ? hitNav.replace('class="pr-hits"', 'class="pr-hits foot"') : '') +
       (total ? '<div class="pr-bar" id="pr-bar"><p class="pr-count" id="pr-count" role="status" aria-live="polite"></p><div class="pr-bar-b">' +
-        '<button type="button" class="btn sm" data-act="pr-hide-all">すべて隠す</button>' +
-        '<button type="button" class="btn sm" data-act="pr-show-all">すべて表示</button>' +
-        '<button type="button" class="btn sm primary" data-act="pr-next">次の1つを表示<kbd>D</kbd></button></div></div>' : '') +
+        '<button type="button" class="btn sm primary" data-act="pr-next">次の1つを表示<kbd>D</kbd></button>' +
+        '<button type="button" class="btn sm" data-act="pr-undo">1つ戻す<kbd>A</kbd></button>' +
+        '<button type="button" class="btn sm" data-act="pr-show-all">全て表示</button>' +
+        '<button type="button" class="btn sm" data-act="pr-hide-all">全て隠す</button></div></div>' : '') +
       '</div>';
     PS.open = { order: [] };
     show(h, opts);
@@ -6490,7 +6501,7 @@ var WSD = (function () {
     var h = '<section class="panel menu pr-menu" aria-labelledby="pm-h"><p class="eyebrow" lang="en">PRINTS</p><h2 id="pm-h" class="menu-h">プリントで学習</h2>';
     if (!PR.length) return h + '<p class="dk-empty">プリントのデータが見つかりませんでした。</p></section>';
     var last = PR.byNo[PS.last];
-    return h + '<p class="dk-empty">授業プリント' + fmt(PR.length) + '枚（No.' + PR[0].no + '〜No.' + PR[PR.length - 1].no + '）。本時のスケジュール（Ａ〜Ｄ）の語句で探して、穴埋めを隠したり表示したりしながら読み直せます。</p>' +
+    return h + '<p class="dk-empty">授業プリント' + fmt(PR.length) + '枚（No.' + PR[0].no + '〜No.' + PR[PR.length - 1].no + '）。語句で探して（本文・答えも対象）、穴埋めを隠したり表示したりしながら読み直せます。</p>' +
       '<form class="dk-new" data-form="print-find" role="search"><label class="sr-only" for="pm-q">プリントを語句で探す</label>' +
       '<input id="pm-q" class="txt" type="search" placeholder="例：ナポレオン　宗教改革" autocomplete="off" enterkeyhint="search">' +
       '<button type="submit" class="btn sm">探す</button></form>' +
@@ -6706,21 +6717,13 @@ var WSD = (function () {
       var t = $('#pr-sec-' + el.getAttribute('data-i'));
       if (t) t.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
     },
-    'pr-scope': function (el) {
-      PS.scope = el.getAttribute('data-val') === 'all' ? 'all' : 'sched';
-      prSave();
-      $$('[data-act="pr-scope"]').forEach(function (b) { if (b.closest('.seg')) b.setAttribute('aria-pressed', String(b.getAttribute('data-val') === PS.scope)); });
-      var qi = $('#pq');
-      if (qi) qi.placeholder = prPlaceholder();
-      prRunSearch();
-    },
+    // × in the search bar: empties the bar only; the list changes on the next 検索
     'pr-clear': function () {
-      PS.q = '';
       var qi = $('#pq'), cb = $('#pr-clear');
       if (qi) { qi.value = ''; qi.focus(); }
-      if (cb) cb.disabled = true;
-      prRunSearch();
+      if (cb) cb.hidden = true;
     },
+    'pr-undo': function () { prUndo(); },
     'quit-test': function () { finishTestEarly(true); if (state.view !== 'testDone') renderHome(); },
     choose: function (el) { choose(+el.getAttribute('data-k')); },
     'submit-ans': function () { submitTyped(false); },
@@ -6893,14 +6896,20 @@ var WSD = (function () {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(function () { state.limit = 60; runSearch(); }, 140);
   });
-  var prTimer = 0;
+  // print search: typing only shows or hides the ×; 検索 (or Enter) runs it
   document.addEventListener('input', function (e) {
     if (e.target.id !== 'pq') return;
-    PS.q = e.target.value;
     var cb = $('#pr-clear');
-    if (cb) cb.disabled = !PS.q;
-    clearTimeout(prTimer);
-    prTimer = setTimeout(prRunSearch, 140);
+    if (cb) cb.hidden = !e.target.value;
+  });
+  document.addEventListener('submit', function (e) {
+    var f = e.target;
+    if (!f || !f.getAttribute || f.getAttribute('data-form') !== 'pr-search') return;
+    e.preventDefault();
+    if (!M) return;
+    var qi = $('#pq');
+    PS.q = qi ? qi.value.trim() : '';
+    prRunSearch();
   });
 
   /* keyboard */
@@ -6944,7 +6953,11 @@ var WSD = (function () {
     var typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
     // glossary and print list: "/" jumps to the search box
     // print list: Esc goes back to the top (in the search box it first clears what is typed)
-    if (state.view === 'prints' && k === 'escape' && !(typing && t.value)) { e.preventDefault(); renderHome(); return; }
+    if (state.view === 'prints' && k === 'escape') {
+      e.preventDefault();
+      if (typing && t.id === 'pq' && t.value) ACTS['pr-clear'](); else renderHome();
+      return;
+    }
     if ((state.view === 'search' || state.view === 'prints') && !typing && e.key === '/') {
       var qb = $(state.view === 'search' ? '#q' : '#pq');
       if (qb) { e.preventDefault(); qb.focus(); qb.select(); }
