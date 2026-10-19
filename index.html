@@ -4271,6 +4271,79 @@ var WSD = (function () {
     return capCache[name];
   }
 
+
+  /* ================= Firebase (Google sign-in + Firestore) ================= */
+  var FB_VER = '10.12.2';
+  var FB_CONFIG = {
+    apiKey: 'AIzaSyColfj1qJrOwPY0N9FqEzcKO-0KXLvHwkg',
+    authDomain: 'worldhistory-a03f9.firebaseapp.com',
+    projectId: 'worldhistory-a03f9',
+    appId: '1:135895753669:web:ee0ea439ceed7a9fc221ac'
+  };
+  var fbPromise = null, fbUser = null;
+  function loadScript(src) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      s.src = src; s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  function loadFirebase() {
+    if (!fbPromise) {
+      var base = 'https://cdn.jsdelivr.net/npm/firebase@' + FB_VER + '/';
+      fbPromise = loadScript(base + 'firebase-app-compat.js')
+        .then(function () {
+          return Promise.all([
+            loadScript(base + 'firebase-auth-compat.js'),
+            loadScript(base + 'firebase-firestore-compat.js')
+          ]);
+        })
+        .then(function () {
+          if (!window.firebase.apps.length) window.firebase.initializeApp(FB_CONFIG);
+          return window.firebase;
+        });
+      fbPromise.catch(function () { fbPromise = null; });
+    }
+    return fbPromise;
+  }
+  function watchAuth(onChange) {
+    loadFirebase().then(function (fb) {
+      fb.auth().onAuthStateChanged(function (user) {
+        fbUser = user;
+        refreshAcct();
+        Cloud.init().then(onChange);
+      });
+    }).catch(function () {
+      Cloud.init().then(onChange);
+    });
+  }
+  function actSignIn() {
+    loadFirebase().then(function (fb) {
+      var provider = new fb.auth.GoogleAuthProvider();
+      return fb.auth().signInWithPopup(provider).catch(function (e) {
+        var c = e && e.code;
+        if (c === 'auth/popup-blocked') return fb.auth().signInWithRedirect(provider);
+        if (c !== 'auth/popup-closed-by-user' && c !== 'auth/cancelled-popup-request') {
+          Cloud.lastErr = c || 'unknown';
+          toast('ログインできませんでした（' + (c || 'unknown') + '）' + (c === 'auth/unauthorized-domain' ? ' Firebaseの承認済みドメインにこのサイトのドメインを追加してください' : ''));
+        }
+      });
+    }, function () { toast('ログインの準備ができませんでした。通信状態を確認してください'); });
+  }
+  function actSignOut() {
+    loadFirebase().then(function (fb) { return fb.auth().signOut(); }).then(function () { toast('ログアウトしました'); });
+  }
+  function acctHTML() {
+    return fbUser
+      ? '<span class="set-status" style="margin:0">' + esc(fbUser.email || 'ログイン中') + '</span>' +
+        '<button type="button" class="btn" data-act="signout">ログアウト</button>'
+      : '<button type="button" class="btn primary" data-act="signin">Googleでログイン</button>';
+  }
+  function refreshAcct() {
+    var el = document.getElementById('acct');
+    if (el) el.innerHTML = acctHTML();
+  }
+
   var Cloud = {
     state: 'off', db: null, base: '', exists: {}, dirty: [], full: [], daysDirty: false, metaDirty: false, listsDirty: false,
     timer: 0, busy: false, again: false,
@@ -4294,32 +4367,43 @@ var WSD = (function () {
       this.timer = setTimeout(function () { self.timer = 0; self.flush(); }, ms == null ? 2500 : ms);
       if (!this.busy) setSync('pending');
     },
+    initSeq: 0, lastErr: '', lastPull: 0,
     init: function () {
       var self = this;
-      if (!window.claude || typeof window.claude.use !== 'function') { self.state = 'local'; setSync(canLocal ? 'local' : 'nostore'); return Promise.resolve(false); }
+      var seq = ++self.initSeq;
+      var user = fbUser;
+      if (!user) {
+        self.state = 'local'; self.db = null;
+        setSync(canLocal ? 'local' : 'nostore');
+        return Promise.resolve(false);
+      }
       self.state = 'connecting'; setSync('connecting');
-      return Promise.all([capUse('db'), capUse('user')]).then(function (r) {
-        var db = r[0], user = r[1];
-        if (!db || !user) throw { code: 'absent' };
-        return Promise.resolve(user.id()).then(function (uid) {
-          if (!uid) throw { code: 'absent' };
-          self.db = db; self.base = 'data/users/' + uid;
-          var refs = [];
-          for (var k = 0; k < SHARDS; k++) refs.push(db.doc(self.base + '/p' + k));
-          refs.push(db.doc(self.base + '/days'));
-          refs.push(db.doc(self.base + '/meta'));
-          refs.push(db.doc(self.base + '/lists'));
-          return getAll(refs);
-        });
+      self.exists = {};
+      return loadFirebase().then(function (fb) {
+        self.db = fb.firestore();
+        self.base = 'users/' + user.uid + '/sync';
+        var refs = [];
+        for (var k = 0; k < SHARDS; k++) refs.push(self.db.doc(self.base + '/p' + k));
+        refs.push(self.db.doc(self.base + '/days'));
+        refs.push(self.db.doc(self.base + '/meta'));
+        refs.push(self.db.doc(self.base + '/lists'));
+        return getAll(refs);
       }).then(function (snaps) {
+        if (seq !== self.initSeq) return false; // a newer sign-in/out superseded this one
         var changed = mergeRemote(snaps);
         self.state = 'on';
         setSync('on');
         if (self.hasWork()) self.schedule(800);
         return changed;
-      }).catch(function () {
+      }).catch(function (e) {
+        if (seq !== self.initSeq) return false;
         self.state = 'local';
-        setSync(canLocal ? 'local' : 'nostore');
+        self.lastErr = (e && (e.code || e.message)) || 'unknown';
+        try { console.warn('[sync] init failed', e); } catch (x) { /* ignore */ }
+        setSync(canLocal ? 'error' : 'nostore');
+        if (e && e.code === 'unavailable') {
+          setTimeout(function () { if (fbUser && self.state === 'local') self.init().then(self.onChange || function () {}); }, 30000);
+        }
         return false;
       });
       function getAll(refs) {
@@ -4332,6 +4416,29 @@ var WSD = (function () {
           throw e;
         });
       }
+    },
+    /* pull what other devices wrote while this page stayed open */
+    pull: function (force) {
+      var self = this;
+      if (this.state !== 'on' || this.busy || !fbUser) return Promise.resolve(false);
+      var now = Date.now();
+      if (!force && now - this.lastPull < 15000) return Promise.resolve(false);
+      this.lastPull = now;
+      var seq = this.initSeq;
+      var chain = this.hasWork() ? this.flush() : Promise.resolve();
+      return Promise.resolve(chain).then(function () {
+        var refs = [];
+        for (var k = 0; k < SHARDS; k++) refs.push(self.db.doc(self.base + '/p' + k));
+        refs.push(self.db.doc(self.base + '/days'));
+        refs.push(self.db.doc(self.base + '/meta'));
+        refs.push(self.db.doc(self.base + '/lists'));
+        return Promise.all(refs.map(function (r) { return r.get(); }));
+      }).then(function (snaps) {
+        if (seq !== self.initSeq || self.state !== 'on') return false;
+        var changed = mergeRemote(snaps);
+        if (self.hasWork()) self.schedule(800);
+        return changed;
+      }).catch(function () { return false; });
     },
     flush: function () {
       var self = this;
@@ -4378,14 +4485,15 @@ var WSD = (function () {
       if (!set || !set.size) return Promise.resolve();
       var keys = Array.from(set);
       set.clear();
-      var part = {};
-      keys.forEach(function (no) { if (P[no]) part[no] = P[no]; });
+      var updates = {};
+      keys.forEach(function (no) { if (P[no]) updates['p.' + no] = P[no]; });
       function restore(e) { keys.forEach(function (no) { set.add(no); }); throw e; }
+      if (!Object.keys(updates).length) return Promise.resolve();
       if (!this.exists['p' + k]) {
         return ref.set({ p: shardAll(k) }).then(function () { self.exists['p' + k] = true; }, restore);
       }
-      return ref.update({ p: part }).catch(function (e) {
-        if (e && e.code === 'invalid_argument') {
+      return ref.update(updates).catch(function (e) {
+        if (e && (e.code === 'invalid_argument' || e.code === 'invalid-argument' || e.code === 'not-found')) {
           // the document may have disappeared; write the whole shard instead
           return ref.set({ p: shardAll(k) });
         }
@@ -4395,14 +4503,16 @@ var WSD = (function () {
     fail: function (e) {
       var code = e && e.code;
       var self = this;
-      if (code === 'invalid_argument' || code === 'not_granted' || code === 'revoked' || code === 'capability_disabled' || code === 'capability_removed' || code === 'transform_error') {
+      this.lastErr = code || (e && e.message) || 'unknown';
+      try { console.warn('[sync] write failed', e); } catch (x) { /* ignore */ }
+      if (code === 'invalid_argument' || code === 'invalid-argument' || code === 'not_granted' || code === 'revoked' || code === 'capability_disabled' || code === 'capability_removed' || code === 'transform_error' || code === 'permission-denied' || code === 'unauthenticated') {
         this.state = 'local';
-        setSync(canLocal ? 'local-only' : 'nostore');
+        setSync(canLocal ? (fbUser ? 'error' : 'local-only') : 'nostore');
         return;
       }
       setSync('error');
       clearTimeout(this.timer);
-      this.timer = setTimeout(function () { self.timer = 0; if (self.state === 'on') self.flush(); }, code === 'quota_exceeded' ? 120000 : 20000);
+      this.timer = setTimeout(function () { self.timer = 0; if (self.state === 'on') self.flush(); }, (code === 'quota_exceeded' || code === 'resource-exhausted') ? 120000 : 20000);
     },
     resetAll: function () {
       if (this.state === 'local') return;
@@ -4488,16 +4598,30 @@ var WSD = (function () {
     var st = $('#set-status');
     if (st) st.textContent = syncText();
   }
+  function errHint() {
+    var c = Cloud.lastErr;
+    if (!c) return 'しばらくすると自動でやり直します。';
+    var h = {
+      'invalid-argument': '保存先の指定が不正です（アプリ側の不具合）。最新版の index.html に置き換えてください。',
+      'permission-denied': 'Firestore のルールが公開されていないか、users/{uid} への書き込みを許可していません。',
+      'unauthenticated': 'ログインの有効期限が切れています。いちどログアウトして、もう一度ログインしてください。',
+      'unavailable': '通信できません。電波の良い場所で、しばらくしてからやり直します。',
+      'not-found': 'Firestore のデータベースがまだ作成されていません。',
+      'failed-precondition': 'Firestore のデータベースが作成されていないか、設定が足りません。',
+      'resource-exhausted': '無料枠の上限に達しました。しばらくしてからやり直します。'
+    }[c] || '';
+    return '（原因コード: ' + c + '）' + h;
+  }
   function syncText() {
     switch (syncState) {
       case 'on': case 'pending': case 'saving':
-        return '進捗はあなたのアカウントに自動で保存されます。別の端末で開いても続きから学習できます。このブラウザにも控えを残しています。';
+        return '進捗はGoogleアカウントに自動で保存されます。別の端末で同じアカウントにログインすれば、続きから学習できます。このブラウザにも控えを残しています。';
       case 'local':
-        return '進捗はこのブラウザに自動で保存されます。別のブラウザや端末に移すときは、バックアップを書き出して、移した先で読み込んでください。';
+        return '進捗はこのブラウザに自動で保存されます。Googleでログインすると、別の端末とも自動で同期します。ログインしない場合は、バックアップを書き出して、移した先で読み込んでください。';
       case 'local-only':
         return 'このページではアカウントへの保存が使えないため、進捗はこのブラウザに保存しています。ほかの端末に移すときはバックアップを使ってください。';
       case 'error':
-        return 'アカウントへの保存がうまくいっていません。このブラウザには保存済みで、しばらくすると自動でやり直します。';
+        return 'アカウントへの保存がうまくいっていません。このブラウザには保存済みです。' + errHint();
       case 'nostore':
         return 'このブラウザでは保存が使えません（プライベートブラウズなど）。学習を終える前にバックアップを書き出してください。';
       default:
@@ -4817,6 +4941,7 @@ var WSD = (function () {
   function settingsHTML() {
     return '<section class="settings" id="settings" aria-labelledby="set-h"><p class="eyebrow" lang="en">BACKUP</p><h2 id="set-h" class="h2">進捗の保存</h2>' +
       '<p class="set-status" id="set-status">' + esc(syncText()) + '</p>' +
+      '<div class="set-actions" id="acct">' + acctHTML() + '</div>' +
       '<div class="set-actions">' +
       '<button type="button" class="btn" data-act="export">バックアップを書き出す</button>' +
       '<button type="button" class="btn" data-act="import">バックアップを読み込む</button>' +
@@ -6606,6 +6731,8 @@ var WSD = (function () {
       var s = $('#settings');
       if (s) s.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' });
     },
+    signin: function () { actSignIn(); },
+    signout: function () { actSignOut(); },
     export: function () { doExport(); },
     import: function () { var f = $('#import-file'); if (f) { f.value = ''; f.click(); } },
     'reset-ask': function () { var c = $('#reset-confirm'); if (c) { c.hidden = false; c.querySelector('.danger').focus(); } },
@@ -6866,8 +6993,18 @@ var WSD = (function () {
   });
   view.addEventListener('pointercancel', function () { swipe = null; });
 
+  function pullNow() {
+    if (!M) return;
+    Cloud.pull().then(function (changed) { if (changed && Cloud.onChange) Cloud.onChange(true); });
+  }
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden' && M) { saveLocal(); Cloud.flush(); }
+    else if (document.visibilityState === 'visible') pullNow();
+  });
+  window.addEventListener('focus', pullNow);
+  window.addEventListener('online', function () {
+    if (Cloud.state === 'local' && fbUser && M) Cloud.init().then(function (c) { if (Cloud.onChange) Cloud.onChange(c); });
+    else pullNow();
   });
   window.addEventListener('pagehide', function () { if (M) saveLocal(); });
   // progress made in another tab of this page shows up here too
@@ -6927,13 +7064,14 @@ var WSD = (function () {
         renderPrint(hot.pno); restored = true;
       }
       if (!restored) renderHome();
-      Cloud.init().then(function (changed) {
+      Cloud.onChange = function (changed) {
         if (!changed) return;
         if (state.view === 'home') renderHome({ keepScroll: true });
         else if (state.view === 'deck') {
           if (deckById(state.deck)) renderDeck(state.deck, { keepScroll: true }); else renderHome();
         }
-      });
+      };
+      watchAuth(Cloud.onChange);
     }).catch(fatal);
   }
   try {
