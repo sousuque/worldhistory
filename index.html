@@ -1399,6 +1399,15 @@ mark { background: var(--mark); color: var(--ink); padding: 0 1px; }
 .pr-count { margin: 0; font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .pr-count b { font-size: 17px; color: var(--ink); }
 .pr-go { margin-left: 14px; }
+/* opened from a search: step through what it found */
+.pr-hits { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 6px 0 12px; padding: 8px 12px; border: 1.5px solid var(--label); }
+.pr-hits.foot { margin: 14px 0 0; }
+.pr-hits-t { font-size: 13px; color: var(--ink-3); }
+.pr-hits-t b { color: var(--ink); }
+.pr-hits-b { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.pr-hits-b kbd { margin-left: 3px; }
+.pr-hits-b kbd + kbd { margin-left: 1px; }
+@media (hover: none) and (pointer: coarse) { .pr-hits-b kbd { display: none; } }
 .pr-go kbd { margin-left: 4px; }
 .pr-go kbd + kbd { margin-left: 2px; }
 @media (hover: none) and (pointer: coarse) { .pr-go kbd { display: none; } }
@@ -6323,7 +6332,8 @@ var WSD = (function () {
     var list = $('#pr-list'), info = $('#pr-info');
     if (!list || !PR) return;
     var r = prFind(PS.q, PS.scope), n = r.items.length;
-    var pos = r.words.filter(function (w) { return !w.neg; }), neg = r.words.filter(function (w) { return w.neg; });
+    PS.found = r.words.length && n ? r.items.map(function (it) { return it.p.no; }) : null;
+    var pos =r.words.filter(function (w) { return !w.neg; }), neg = r.words.filter(function (w) { return w.neg; });
     var head;
     if (!r.words.length) head = PR.length ? '全<b>' + fmt(PR.length) + '</b>枚（No.' + PR[0].no + '〜No.' + PR[PR.length - 1].no + '）' : 'プリントのデータがありません';
     else {
@@ -6351,11 +6361,17 @@ var WSD = (function () {
     var prev = PR[p.k - 1], next = PR[p.k + 1];
     var cats = PR_CATS.filter(function (c) { return R[c[0]]; });
     var nf = prFigs(p).length;
+    var hi = prHitAt(p.no), hPrev = hi >= 0 ? prHitNext(-1) : null, hNext = hi >= 0 ? prHitNext(1) : null;
+    var hitNav = hi < 0 ? '' : '<nav class="pr-hits" aria-label="検索結果の前後"><span class="pr-hits-t">「' + esc(PS.hitQ) + '」の検索結果 <b>' + (hi + 1) + '</b> / ' + PS.hits.length + '</span>' +
+      '<span class="pr-hits-b">' +
+      '<button type="button" class="btn sm" data-act="print-open" data-no="' + (hPrev ? hPrev.no : '') + '"' + (hPrev ? '' : ' disabled') + '>← ' + (hPrev ? 'No.' + hPrev.no : '前の一致') + '<kbd>Shift</kbd><kbd>B</kbd></button>' +
+      '<button type="button" class="btn sm" data-act="print-open" data-no="' + (hNext ? hNext.no : '') + '"' + (hNext ? '' : ' disabled') + '>' + (hNext ? 'No.' + hNext.no : '次の一致') + ' →<kbd>Shift</kbd><kbd>N</kbd></button>' +
+      '<button type="button" class="link" data-act="prints">検索結果へ戻る</button></span></nav>';
     var h = '<div class="wrap print"><p class="eyebrow">PRINT — 授業プリント</p>' +
       '<div class="pr-title"><h1 class="page-h">No.' + p.no + '</h1><div class="tools">' +
       (prev ? '<button type="button" class="link" data-act="print-open" data-no="' + prev.no + '">← No.' + prev.no + '</button>' : '') +
       (next ? '<button type="button" class="link" data-act="print-open" data-no="' + next.no + '">No.' + next.no + ' →</button>' : '') +
-      '<button type="button" class="link" data-act="prints">プリント一覧</button></div></div>' +
+      '<button type="button" class="link" data-act="prints">プリント一覧</button></div></div>' + hitNav +
       (p.ref || nf ? '<p class="pr-ref">' + esc(p.ref) + (nf ? '<span class="pr-nf">図版 ' + nf + '点（押すと拡大）</span>' : '') + '</p>' : '') +
       (p.sched.length ? '<nav class="pr-sched" aria-label="本時のスケジュール"><p class="pr-sched-h">本時のスケジュール</p><ol class="pr-sched-l">' + p.sched.map(function (x) {
         return '<li><button type="button" class="pr-jump" data-act="pr-jump" data-i="' + PR_LET.indexOf(x.l) + '"><span class="pr-let">' + esc(x.l) + '</span><span>' + esc(x.t) + '</span></button></li>';
@@ -6365,15 +6381,18 @@ var WSD = (function () {
       }).join('') + '</div></div>' +
         '<p class="pr-help">赤い帯を押すと、その1か所だけ表示・非表示が切り替わります。下のバーでまとめて切り替えられます。</p>' +
         '<dl class="keys pr-keys" aria-label="キー操作"><div><dt><kbd>S</kbd></dt><dd>すべて表示 / すべて隠す</dd></div>' +
-        '<div><dt><kbd>D</kbd></dt><dd>次の1つを表示</dd></div><div><dt><kbd>A</kbd></dt><dd>1つ戻す（隠す）</dd></div>' +
-        '<div><dt><kbd>Shift</kbd><kbd>N</kbd></dt><dd>次のプリントへ（全部表示後）</dd></div>' +
-        '<div><dt><kbd>Shift</kbd><kbd>B</kbd></dt><dd>前のプリントへ（全部表示後）</dd></div>' +
+        '<div><dt><kbd>D</kbd></dt><dd>次の1つを表示</dd></div><div><dt><kbd>Shift</kbd><kbd>D</kbd></dt><dd>今表示したものを隠す</dd></div>' +
+        '<div><dt><kbd>N</kbd></dt><dd>次のプリントへ（全部表示後）</dd></div>' +
+        '<div><dt><kbd>B</kbd></dt><dd>前のプリントへ（全部表示後）</dd></div>' +
+        (hi >= 0 ? '<div><dt><kbd>Shift</kbd><kbd>N</kbd></dt><dd>次の検索結果へ（全部表示後）</dd></div>' +
+          '<div><dt><kbd>Shift</kbd><kbd>B</kbd></dt><dd>前の検索結果へ（全部表示後）</dd></div>' : '') +
+        '<div><dt><kbd>A</kbd></dt><dd>1つ戻す（隠す）</dd></div>' +
         '<div><dt><kbd>Esc</kbd></dt><dd>プリント一覧へ</dd></div></dl>' : '') +
       '<article class="pr-doc" id="pr-doc">' + doc + '</article>' +
       '<nav class="pr-pager" aria-label="前後のプリント">' +
       (prev ? '<button type="button" class="btn" data-act="print-open" data-no="' + prev.no + '"><span class="pg-d">← No.' + prev.no + '</span><span class="pg-t">' + esc(prTitle(prev)) + '</span></button>' : '<span></span>') +
       (next ? '<button type="button" class="btn nx" data-act="print-open" data-no="' + next.no + '"><span class="pg-d">No.' + next.no + ' →</span><span class="pg-t">' + esc(prTitle(next)) + '</span></button>' : '<span></span>') +
-      '</nav>' +
+      '</nav>' + (hitNav ? hitNav.replace('class="pr-hits"', 'class="pr-hits foot"') : '') +
       (total ? '<div class="pr-bar" id="pr-bar"><p class="pr-count" id="pr-count" role="status" aria-live="polite"></p><div class="pr-bar-b">' +
         '<button type="button" class="btn sm" data-act="pr-hide-all">すべて隠す</button>' +
         '<button type="button" class="btn sm" data-act="pr-show-all">すべて表示</button>' +
@@ -6418,13 +6437,26 @@ var WSD = (function () {
     var items = prItems(), shown = items.filter(function (el) { return el.classList.contains('is-shown'); }).length;
     var p = PR && PR.byNo[PS.no], next = p && PR[p.k + 1];
     c.innerHTML = (items.length ? '表示 <b>' + shown + '</b> / ' + items.length : 'いまは隠しているものがありません') +
-      (shown === items.length && next ? '<button type="button" class="link pr-go" data-act="print-open" data-no="' + next.no + '">次のプリントへ<kbd>Shift</kbd><kbd>N</kbd></button>' : '');
+      (shown === items.length && next ? '<button type="button" class="link pr-go" data-act="print-open" data-no="' + next.no + '">次のプリントへ<kbd>N</kbd></button>' : '');
     $$('.pr-bar-b .btn').forEach(function (b) { b.disabled = !items.length; });
   }
-  /* Shift+N / Shift+B: on to the next or back to the previous print once every box on this one is showing */
-  function prGo(dir) {
-    var p = PR && PR.byNo[PS.no], q = p && PR[p.k + dir];
-    if (!q) { toast(dir > 0 ? 'これが最後のプリントです' : 'これが最初のプリントです'); return; }
+  /* N / B: on to the next or back to the previous print once every box on this one is showing */
+  /* the prints a search found, in the order the list showed them, kept while one of them is open */
+  function prHitAt(no) { return PS.hits ? PS.hits.indexOf(no) : -1; }
+  function prHitNext(dir) {
+    if (!PS.hits) return null;
+    var i = prHitAt(PS.no);
+    if (i >= 0) return PR.byNo[PS.hits[i + dir]] || null;
+    // moved off the results with N / B: the nearest result by No. that way
+    var by = PS.hits.slice().sort(function (a, b) { return a - b; }).filter(function (n) { return dir > 0 ? n > PS.no : n < PS.no; });
+    return PR.byNo[dir > 0 ? by[0] : by[by.length - 1]] || null;
+  }
+  /* N / B: on to the next or back to the previous print (by No.) once every box on this one is showing;
+     Shift+N / Shift+B do the same through the search results */
+  function prGo(dir, hits) {
+    var p = PR && PR.byNo[PS.no], q = hits ? prHitNext(dir) : p && PR[p.k + dir];
+    if (hits && !PS.hits) { toast('検索結果から開いたプリントではありません'); return; }
+    if (!q) { toast(hits ? (dir > 0 ? '検索結果の最後のプリントです' : '検索結果の最初のプリントです') : (dir > 0 ? 'これが最後のプリントです' : 'これが最初のプリントです')); return; }
     if (prItems().some(function (el) { return !el.classList.contains('is-shown'); })) {
       toast('まだ隠れている空欄があります。S ですべて表示してから移動できます');
       return;
@@ -6647,7 +6679,11 @@ var WSD = (function () {
     },
     home: function () { renderHome(); },
     prints: function () { renderPrints(); },
-    'print-open': function (el) { renderPrint(+el.getAttribute('data-no')); },
+    'print-open': function (el) {
+      // opened from a search: remember what it found, so the print can step through those
+      if (el.closest('#pr-list')) { PS.hits = PS.found ? PS.found.slice() : null; PS.hitQ = PS.q.trim(); }
+      renderPrint(+el.getAttribute('data-no'));
+    },
     pb: function (el) {
       if (!el.hasAttribute('role')) return; // a kind that is not being hidden
       prShow(el, !el.classList.contains('is-shown'));
@@ -6907,6 +6943,8 @@ var WSD = (function () {
     var t = e.target;
     var typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
     // glossary and print list: "/" jumps to the search box
+    // print list: Esc goes back to the top (in the search box it first clears what is typed)
+    if (state.view === 'prints' && k === 'escape' && !(typing && t.value)) { e.preventDefault(); renderHome(); return; }
     if ((state.view === 'search' || state.view === 'prints') && !typing && e.key === '/') {
       var qb = $(state.view === 'search' ? '#q' : '#pq');
       if (qb) { e.preventDefault(); qb.focus(); qb.select(); }
@@ -6921,11 +6959,12 @@ var WSD = (function () {
       }
       if (typing) return;
       if (k === 'escape') { e.preventDefault(); renderPrints(); return; }
-      if (e.shiftKey && (k === 'n' || k === 'b')) { e.preventDefault(); if (!e.repeat) prGo(k === 'n' ? 1 : -1); return; }
+      if (k === 'n' || k === 'b') { e.preventDefault(); if (!e.repeat) prGo(k === 'n' ? 1 : -1, e.shiftKey); return; }
       if (k !== 's' && k !== 'd' && k !== 'a') return;
       e.preventDefault();
       if (e.repeat && k !== 'd') return;
-      if (k === 'd') prNext();
+      if (k === 'd' && e.shiftKey) prUndo(); // Shift+D: hide the one just shown
+      else if (k === 'd') prNext();
       else if (k === 'a') prUndo();
       else prAll(prItems().some(function (el) { return !el.classList.contains('is-shown'); }));
       return;
