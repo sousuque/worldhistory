@@ -4244,7 +4244,7 @@ var WSD = (function () {
       if (g && typeof g === 'object') {
         var G = state.gl;
         if (GL_SORTS.indexOf(g.sort) >= 0) G.sort = g.sort;
-        if (g.scope === 'all' || g.scope === 'name') G.scope = g.scope;
+        // the glossary always searches names, readings and explanations (G.scope stays 'all')
         if (Array.isArray(g.cats)) g.cats.forEach(function (i) { if (i >= 0 && i < nCat) G.cats.add(i); });
         if (Array.isArray(g.kinds)) g.kinds.forEach(function (i) { if (i >= 0 && i < nKind) G.kinds.add(i); });
         if (Array.isArray(g.st)) g.st.forEach(function (k) { if (GL_ST.indexOf(k) >= 0) G.st.add(k); });
@@ -5479,7 +5479,7 @@ var WSD = (function () {
       '<div><dt><code>-</code>をつける</dt><dd>その語を含む用語を除きます。例：<code>戦争 -第</code></dd></div>' +
       '<div><dt><kbd>/</kbd> キー</dt><dd>どこからでも検索欄に移ります。</dd></div>' +
       '<div><dt>ひらがな</dt><dd>用語の読みの先頭からも探せます。例：<code>しゅうこう</code> → 周口店</dd></div>' +
-      '</dl><p class="fg-note">全角・半角、ひらがな・カタカナ、「=」「・」の有無は区別しません。「用語名だけ」にすると説明文は探しません。</p></details>';
+      '</dl><p class="fg-note">全角・半角、ひらがな・カタカナ、「=」「・」の有無は区別しません。用語名・読み・説明文のすべてから探します。</p></details>';
   }
   function glIndexHTML() {
     var G = state.gl;
@@ -5498,13 +5498,13 @@ var WSD = (function () {
     state.view = 'search'; setNav('search');
     var G = state.gl;
     show('<div class="wrap search"><p class="eyebrow" lang="en">GLOSSARY</p><h1 class="page-h">用語集</h1>' +
-      '<div class="search-box"><label class="sr-only" for="q">用語を検索</label>' +
-      '<div class="q-wrap"><input id="q" type="search" value="' + esc(state.q) + '" placeholder="用語・読み・説明文から検索" autocomplete="off" spellcheck="false" enterkeyhint="search" aria-keyshortcuts="/">' +
-      '<kbd class="q-key" aria-hidden="true">/</kbd></div>' +
-      '<button type="button" class="btn clear-q" data-act="clear-q" id="clear-q"' + (state.q ? '' : ' disabled') + '>クリア</button></div>' +
+      // like the print search: × empties the bar, 検索 (or Enter) runs it; always over names, readings and explanations
+      '<form class="search-box" data-form="gl-search" role="search"><label class="sr-only" for="q">用語を検索</label>' +
+      '<div class="q-wrap"><input id="q" type="text" value="' + esc(state.q) + '" placeholder="語句を入れて「検索」（用語・読み・説明文が対象）" autocomplete="off" spellcheck="false" enterkeyhint="search" aria-keyshortcuts="/">' +
+      '<button type="button" class="q-x" data-act="clear-q" id="clear-q" aria-label="検索バーをクリア" title="クリア"' + (state.q ? '' : ' hidden') + '>×</button></div>' +
+      '<button type="submit" class="btn primary clear-q">検索</button></form>' +
       '<div class="gl-bar">' +
       glSeg('並べ替え', 'sort', [['text', '教科書順'], ['kana', 'あいうえお順'], ['year', '年代順']], G.sort) +
-      glSeg('検索の対象', 'scope', [['all', '用語名と説明文'], ['name', '用語名だけ']], G.scope) +
       '</div>' + glFilterHTML() + glHelpHTML() +
       '<div class="gl-index" id="gl-index">' + glIndexHTML() + '</div>' +
       '<p class="search-info" id="search-info" role="status"></p>' +
@@ -5627,7 +5627,7 @@ var WSD = (function () {
     } else head = parts.length ? '絞り込んだ用語' : 'すべての用語';
     var txt = r.items.length ? head + ' ' + fmt(r.items.length) + '語（' + SORT_LABEL[G.sort] + '）' : head + 'は見つかりませんでした';
     if (parts.length) txt += '　' + parts.join('／');
-    if (!r.items.length && (parts.length || G.scope === 'name')) txt += '。絞り込みや検索の対象を広げてみてください';
+    if (!r.items.length && parts.length) txt += '。絞り込みを広げてみてください';
     return txt;
   }
   function itemHTML(c, words, showYear) {
@@ -6746,14 +6746,11 @@ var WSD = (function () {
       startTest(pool, fromDeck ? T.label : rangeLabel(), { src: T.src });
     },
     more: function () { state.limit += 60; runSearch(); },
-    'clear-q': function (el) {
-      var qi = $('#q');
-      state.q = '';
+    // × in the glossary search bar: empties the bar only; the list changes on the next 検索
+    'clear-q': function () {
+      var qi = $('#q'), cb = $('#clear-q');
       if (qi) { qi.value = ''; qi.focus(); }
-      el.disabled = true;
-      clearTimeout(searchTimer);
-      state.limit = 60;
-      runSearch();
+      if (cb) cb.hidden = true;
     },
     'modal-close': function () { closeModal(); },
     mark: function (el) { markFromModal(+el.getAttribute('data-i'), +el.getAttribute('data-st')); },
@@ -6887,14 +6884,21 @@ var WSD = (function () {
   window.addEventListener('resize', moveTabInd);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(moveTabInd);
   moveTabInd();
-  var searchTimer = 0;
+  // glossary search: typing only shows or hides the ×; 検索 (or Enter) runs it
   document.addEventListener('input', function (e) {
     if (e.target.id !== 'q') return;
-    state.q = e.target.value;
     var cb = $('#clear-q');
-    if (cb) cb.disabled = !state.q;
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(function () { state.limit = 60; runSearch(); }, 140);
+    if (cb) cb.hidden = !e.target.value;
+  });
+  document.addEventListener('submit', function (e) {
+    var f = e.target;
+    if (!f || !f.getAttribute || f.getAttribute('data-form') !== 'gl-search') return;
+    e.preventDefault();
+    if (!M) return;
+    var qi = $('#q');
+    state.q = qi ? qi.value.trim() : '';
+    state.limit = 60;
+    runSearch();
   });
   // print search: typing only shows or hides the ×; 検索 (or Enter) runs it
   document.addEventListener('input', function (e) {
@@ -6956,6 +6960,11 @@ var WSD = (function () {
     if (state.view === 'prints' && k === 'escape') {
       e.preventDefault();
       if (typing && t.id === 'pq' && t.value) ACTS['pr-clear'](); else renderHome();
+      return;
+    }
+    if (state.view === 'search' && k === 'escape') {
+      e.preventDefault();
+      if (typing && t.id === 'q' && t.value) ACTS['clear-q'](); else renderHome();
       return;
     }
     if ((state.view === 'search' || state.view === 'prints') && !typing && e.key === '/') {
