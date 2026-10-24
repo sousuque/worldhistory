@@ -1040,6 +1040,19 @@ button.rel:hover { border-color: var(--link); }
 .search-info { margin: 16px 0 8px; font-size: 13px; color: var(--ink-3); }
 .gl-bar { display: flex; flex-wrap: wrap; gap: 0 32px; margin-top: 4px; }
 .gl-bar .opt { grid-template-columns: auto minmax(0, 1fr); }
+.gl-bar .gl-hist-bar { margin-left: auto; }
+.gl-hist-bar button:disabled { opacity: 0.4; }
+.gl-hist-bar button:disabled:hover { border-color: var(--line); }
+/* the terms looked up before, shown while the search bar is empty */
+.gl-hist { margin-top: 18px; }
+.gl-hist:empty { display: none; }
+.gl-hist-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
+.gl-hist-head .opt-l { margin: 0; padding: 0; }
+.gl-hist-head .n { margin-left: 8px; letter-spacing: 0; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.gl-hist .chips { align-items: center; }
+.gl-hist .mk-chip { max-width: 100%; }
+.gl-hist .mk-go { min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.gl-hist .confirm { margin-top: 10px; }
 .gl-filter, .gl-help { margin-top: 14px; padding: 0 18px; border: 1.5px solid var(--line); }
 .gl-help { border-color: var(--rule); }
 .gl-filter summary, .gl-help summary {
@@ -1578,6 +1591,7 @@ mark { background: var(--mark); color: var(--ink); padding: 0 1px; }
   .gl-index { grid-template-columns: minmax(0, 1fr); }
   .gl-bar .opt { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .gl-bar .opt-l { padding-top: 0; }
+  .gl-bar .gl-hist-bar { margin-left: 0; }
   .panel { padding: 18px 14px 20px; }
   .choices { grid-template-columns: minmax(0, 1fr); }
   .choice { min-height: 56px; font-size: 15px; }
@@ -4048,12 +4062,17 @@ var WSD = (function () {
       (function (node) { setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 1800); })(b);
     }
   }
-  /* a new screen: its top-level blocks rise in turn and the headline numbers count up */
+  /* a new screen: its top-level blocks rise in turn and the headline numbers count up.
+     A screen that comes back scrolled down starts the turns at the first block in view */
   function enter() {
     if (reducedMotion()) return;
     var w = view.firstElementChild;
     if (!w) return;
-    Array.prototype.forEach.call(w.children, function (el, k) { el.style.setProperty('--i', Math.min(k, 8)); });
+    var k = 0, scrolled = window.scrollY > 0;
+    Array.prototype.forEach.call(w.children, function (el) {
+      var above = scrolled && el.getBoundingClientRect().bottom <= 0;
+      el.style.setProperty('--i', above ? 0 : Math.min(k++, 8));
+    });
     w.classList.add('view-in');
     $$('.hero-n, .stat-v, .score-n', w).forEach(function (el) { countUp(el, el.classList.contains('hero-n') ? 1100 : 800); });
   }
@@ -4279,6 +4298,73 @@ var WSD = (function () {
     saveLists(); saveSettings();
   }
 
+  /* ================= glossary history ================= */
+  // H.e[No.] = when the term was looked up in the glossary, H.x[No.] = when it was taken out of the history,
+  // H.c = when the whole history was cleared (ms since 2024). Kept per term, so two devices' histories merge
+  // instead of one replacing the other. HIST = [No., ...], newest first: the history as it is shown
+  var H = { e: {}, x: {}, c: 0 }, HIST = [], HIST_MAX = 200, HIST_GONE_MAX = 300, histDirty = false;
+  function newestFirst(o, n) {
+    return Object.keys(o).sort(function (a, b) { return o[b] - o[a] || a - b; }).slice(0, n);
+  }
+  function cleanHist(o) {
+    var out = { e: {}, x: {}, c: 0 }, e = {}, x = {};
+    if (Array.isArray(o)) { // the first version kept only the order: [No., ...] newest first
+      var order = {};
+      o.forEach(function (no, k) { if (!order[no]) order[no] = o.length - k; });
+      o = { e: order };
+    }
+    if (!o || typeof o !== 'object') return out;
+    out.c = Math.max(0, Number(o.c) || 0);
+    if (o.x && typeof o.x === 'object') Object.keys(o.x).forEach(function (no) {
+      var t = Number(o.x[no]) || 0;
+      if (validNo(no) && t > out.c) x[+no] = t;
+    });
+    if (o.e && typeof o.e === 'object') Object.keys(o.e).forEach(function (no) {
+      var t = Number(o.e[no]) || 0;
+      if (validNo(no) && t > out.c && t > (x[+no] || 0)) e[+no] = t;
+    });
+    newestFirst(e, HIST_MAX).forEach(function (no) { out.e[no] = e[no]; });
+    newestFirst(x, HIST_GONE_MAX).forEach(function (no) { out.x[no] = x[no]; });
+    return out;
+  }
+  /* the later of each look-up and each removal wins, term by term */
+  function mergeHist(a, b) {
+    var o = { e: {}, x: {}, c: Math.max(a.c, b.c) };
+    [a, b].forEach(function (h) {
+      ['e', 'x'].forEach(function (k) {
+        Object.keys(h[k]).forEach(function (no) { o[k][no] = Math.max(o[k][no] || 0, h[k][no]); });
+      });
+    });
+    return cleanHist(o);
+  }
+  function histKey(h) { return JSON.stringify(h); }
+  function histEmpty(h) { return !h.c && !Object.keys(h.e).length && !Object.keys(h.x).length; }
+  function setHist(h) { H = h; HIST = newestFirst(H.e, HIST_MAX).map(Number); histDirty = true; }
+  function loadHist() { setHist(cleanHist(LS.get('hist'))); }
+  /* write it down, taking in what another tab of this page added meanwhile */
+  function saveHist() {
+    setHist(mergeHist(H, cleanHist(LS.get('hist'))));
+    LS.set('hist', H);
+    Cloud.markHist();
+  }
+  // each change is stamped later than what it overrides, even when another device's clock runs ahead
+  function addHist(c) {
+    if (HIST[0] === c.no) return;
+    H.e[c.no] = Math.max(nowS(), H.c + 1, (H.x[c.no] || 0) + 1, (H.e[HIST[0]] || 0) + 1);
+    delete H.x[c.no];
+    saveHist();
+  }
+  function dropHist(no) {
+    if (!(no in H.e)) return;
+    H.x[no] = Math.max(nowS(), H.e[no] + 1);
+    delete H.e[no];
+    saveHist();
+  }
+  function clearHist() {
+    H = { e: {}, x: {}, c: Math.max(nowS(), (H.e[HIST[0]] || 0) + 1) };
+    saveHist();
+  }
+
   /* ================= settings ================= */
   var FLASH_FILTERS = ['todo', 'fresh', 'notyet', 'known', 'miss', 'all'];
   var TEST_FILTERS = ['all', 'todo', 'known', 'miss'];
@@ -4433,6 +4519,7 @@ var WSD = (function () {
 
   var Cloud = {
     state: 'off', db: null, base: '', exists: {}, dirty: [], full: [], daysDirty: false, metaDirty: false, listsDirty: false,
+    histDirty: false, histOk: false, // histOk: the glossary history's document could be read on the last pull
     timer: 0, busy: false, again: false,
     mark: function (no) {
       if (this.state === 'local') return;
@@ -4442,10 +4529,13 @@ var WSD = (function () {
     },
     markDays: function () { if (this.state === 'local') return; this.daysDirty = true; this.schedule(); },
     markLists: function () { if (this.state === 'local') return; this.listsDirty = true; this.schedule(); },
+    markHist: function () { if (this.state === 'local') return; this.histDirty = true; this.schedule(); },
     hasWork: function () {
       for (var k = 0; k < SHARDS; k++) if (this.full[k] || (this.dirty[k] && this.dirty[k].size)) return true;
-      return this.daysDirty || this.metaDirty || this.listsDirty;
+      return this.daysDirty || this.metaDirty || this.listsDirty || (this.histDirty && this.histOk);
     },
+    /* the history is read on its own: if the project's rules do not reach it, the rest still syncs */
+    getHist: function () { return this.db.doc(this.base + '/hist').get().catch(function () { return null; }); },
     schedule: function (ms) {
       if (this.state !== 'on') return;
       if (this.timer && ms == null) return; // a write is already queued; batch into it
@@ -4474,10 +4564,10 @@ var WSD = (function () {
         refs.push(self.db.doc(self.base + '/days'));
         refs.push(self.db.doc(self.base + '/meta'));
         refs.push(self.db.doc(self.base + '/lists'));
-        return getAll(refs);
-      }).then(function (snaps) {
+        return Promise.all([getAll(refs), self.getHist()]);
+      }).then(function (got) {
         if (seq !== self.initSeq) return false; // a newer sign-in/out superseded this one
-        var changed = mergeRemote(snaps);
+        var changed = mergeRemote(got[0], got[1]);
         self.state = 'on';
         setSync('on');
         if (self.hasWork()) self.schedule(800);
@@ -4519,10 +4609,10 @@ var WSD = (function () {
         refs.push(self.db.doc(self.base + '/days'));
         refs.push(self.db.doc(self.base + '/meta'));
         refs.push(self.db.doc(self.base + '/lists'));
-        return Promise.all(refs.map(function (r) { return r.get(); }));
-      }).then(function (snaps) {
+        return Promise.all([Promise.all(refs.map(function (r) { return r.get(); })), self.getHist()]);
+      }).then(function (got) {
         if (seq !== self.initSeq || self.state !== 'on') return false;
-        var changed = mergeRemote(snaps);
+        var changed = mergeRemote(got[0], got[1]);
         if (self.hasWork()) self.schedule(800);
         return changed;
       }).catch(function () { return false; });
@@ -4550,6 +4640,14 @@ var WSD = (function () {
         if (!self.listsDirty) return;
         self.listsDirty = false;
         return self.db.doc(self.base + '/lists').set({ l: L }).catch(function (e) { self.listsDirty = true; throw e; });
+      }).then(function () {
+        if (!self.histDirty || !self.histOk) return;
+        self.histDirty = false;
+        return self.db.doc(self.base + '/hist').set({ h: H }).catch(function (e) {
+          // rules that keep this document out: the history stays in this browser, the rest goes on syncing
+          if (e && e.code === 'permission-denied') { self.histOk = false; return; }
+          self.histDirty = true; throw e;
+        });
       });
       return chain.then(function () {
         self.busy = false;
@@ -4609,7 +4707,7 @@ var WSD = (function () {
     }
   };
 
-  function mergeRemote(snaps) {
+  function mergeRemote(snaps, hs) {
     var changed = false;
     var meta = snaps[SHARDS + 1];
     var remoteReset = meta && meta.exists ? Number((meta.data() || {}).resetAt) || 0 : 0;
@@ -4659,6 +4757,14 @@ var WSD = (function () {
       if (rlc.t > L.t) { L = rlc; LS.set('lists', L); changed = true; }
       else if (L.t > rlc.t) Cloud.listsDirty = true;
     } else if (L.t || L.decks.length || L.marks.length) Cloud.listsDirty = true;
+    // glossary history: merged term by term, so what was looked up on either device stays
+    Cloud.histOk = !!hs;
+    if (hs) {
+      var rh = hs.exists ? cleanHist((hs.data() || {}).h) : null;
+      var mh = rh ? mergeHist(H, rh) : H;
+      if (histKey(mh) !== histKey(H)) { setHist(mh); LS.set('hist', H); changed = true; }
+      if (rh ? histKey(mh) !== histKey(rh) : !histEmpty(H)) Cloud.histDirty = true;
+    }
     if (changed) localDirty = true;
     if (Object.keys(DAYS).some(function (key) {
       var r = rd && rd[key];
@@ -4827,14 +4933,51 @@ var WSD = (function () {
     moveTabInd();
   }
   function show(html, opts) {
+    if (state.view !== 'search') parked = null; // moved on to another study screen
     view.innerHTML = html;
     if (!opts || !opts.keepScroll) { window.scrollTo(0, 0); if (!opts || !opts.quiet) enter(); }
     try { view.focus({ preventScroll: true }); } catch (e) { view.focus(); }
   }
-  function go(where) {
+  // back: the 学習 tab, which returns from the glossary to the study screen it was opened from
+  function go(where, back) {
     closeModal();
+    if (where === 'search') { renderSearch(); return; }
+    if (back && state.view === 'search' && unpark()) return;
     if (state.view === 'test' && state.test) finishTestEarly(false);
-    if (where === 'search') renderSearch(); else renderHome();
+    renderHome();
+  }
+  /* the study screen left for the glossary keeps its own nodes (shown blanks, a typed answer) and its scroll */
+  var parked = null;
+  function park() {
+    if (state.view === 'search' || state.view === 'loading') return;
+    var cur = $('.tab[aria-current="page"]'), y = window.scrollY, nodes = document.createDocumentFragment();
+    while (view.firstChild) nodes.appendChild(view.firstChild);
+    parked = { view: state.view, nav: cur ? cur.getAttribute('data-nav') : null, nodes: nodes, y: y };
+  }
+  function unpark() {
+    var p = parked;
+    parked = null;
+    if (!p) return false;
+    // home and decks show counts, decks and marks the glossary may have changed, so they are drawn again
+    if (p.view === 'home') renderHome({ keepScroll: true });
+    else if (p.view === 'deck') renderDeck(state.deck, { keepScroll: true });
+    else {
+      state.view = p.view; setNav(p.nav);
+      view.innerHTML = '';
+      view.appendChild(p.nodes);
+      // back in the page its animations start over: the entrances may, what played while it was in use may not
+      view.firstElementChild.classList.remove('view-in');
+      if (view.getAnimations) view.getAnimations({ subtree: true }).forEach(function (a) {
+        if (a.animationName !== 'rise') { try { a.finish(); } catch (e) { /* an endless one */ } }
+      });
+      try { view.focus({ preventScroll: true }); } catch (e) { view.focus(); }
+      if (p.view === 'flash') refreshCardMeta();
+      var ans = p.view === 'test' && $('#ans');
+      if (ans && !coarse()) ans.focus({ preventScroll: true });
+    }
+    window.scrollTo(0, p.y);
+    enter(); // and it rises in like any other screen
+    return true;
   }
 
   /* ================= home ================= */
@@ -5557,6 +5700,7 @@ var WSD = (function () {
       }).join('') + '</div>';
   }
   function renderSearch() {
+    park();
     state.view = 'search'; setNav('search');
     var G = state.gl;
     show('<div class="wrap search"><p class="eyebrow" lang="en">GLOSSARY</p><h1 class="page-h">用語集</h1>' +
@@ -5567,8 +5711,13 @@ var WSD = (function () {
       '<button type="submit" class="btn primary clear-q">検索</button></form>' +
       '<div class="gl-bar">' +
       glSeg('並べ替え', 'sort', [['text', '教科書順'], ['kana', 'あいうえお順'], ['year', '年代順']], G.sort) +
+      '<div class="opt gl-hist-bar"><span class="opt-l">履歴</span><div class="seg">' +
+      '<button type="button" data-act="hist-csv" id="hist-csv" title="履歴の用語と解説をCSVファイルで保存"' + (HIST.length ? '' : ' disabled') + '>CSVで保存' +
+      '<span class="n" id="hist-n">' + fmt(HIST.length) + '語</span></button></div></div>' +
       '</div>' + glFilterHTML() + glHelpHTML() +
       '<div class="gl-index" id="gl-index">' + glIndexHTML() + '</div>' +
+      // the terms looked up before, while nothing is typed in the search bar
+      '<div class="gl-hist" id="gl-hist"' + (state.q ? ' hidden' : '') + '>' + glHistHTML() + '</div>' +
       '<p class="search-info" id="search-info" role="status"></p>' +
       '<div class="gl-acts"><button type="button" class="link" data-act="gl-bulk" id="gl-bulk" hidden></button></div>' +
       '<div class="res-list" id="results"></div>' +
@@ -5732,6 +5881,59 @@ var WSD = (function () {
     }
     more.hidden = r.items.length <= state.limit;
     more.textContent = 'さらに表示（残り' + fmt(Math.max(0, r.items.length - state.limit)) + '語）';
+    return r;
+  }
+  /* the history under the search bar: one chip per term, newest first, each with its own × */
+  var HIST_SHOW = 24, histAll = false;
+  function glHistHTML() {
+    var cards = HIST.map(function (no) { return M.byNo[no]; }).filter(Boolean);
+    if (!cards.length) return '';
+    var all = histAll || cards.length <= HIST_SHOW;
+    return '<div class="gl-hist-head"><h2 class="opt-l">最近調べた用語<span class="n">' + fmt(cards.length) + '語</span></h2>' +
+      '<button type="button" class="link" data-act="hist-clear-ask">履歴をすべて消す</button></div>' +
+      '<div class="chips">' + (all ? cards : cards.slice(0, HIST_SHOW)).map(function (c) {
+        return '<span class="mk-chip"><button type="button" class="mk-go" data-card="' + c.i + '">' + esc(c.disp) + '</button>' +
+          '<button type="button" class="mk-del" data-act="hist-del" data-no="' + c.no + '" aria-label="「' + esc(c.disp) + '」を履歴から消す">×</button></span>';
+      }).join('') +
+      (all ? '' : '<button type="button" class="link" data-act="hist-all">すべて表示（' + fmt(cards.length) + '語）</button>') + '</div>' +
+      '<div class="confirm" id="hist-confirm" hidden><p>用語集の履歴（' + fmt(cards.length) + '語）をすべて消します。用語そのものや学習の記録は消えません。</p><div class="set-actions">' +
+      '<button type="button" class="btn danger sm" data-act="hist-clear-do">消す</button><button type="button" class="btn sm" data-act="hist-clear-cancel">やめる</button></div></div>';
+  }
+  function refreshHist(focusDel) {
+    histDirty = false;
+    var box = $('#gl-hist');
+    if (state.view !== 'search' || !box) return;
+    // a chip that had the focus keeps it after the chips are drawn again
+    var a = document.activeElement, keep = a && box.contains(a) && a.getAttribute('data-card');
+    box.innerHTML = glHistHTML();
+    var b = $('#hist-csv'), n = $('#hist-n');
+    if (b) b.disabled = !HIST.length;
+    if (n) n.textContent = fmt(HIST.length) + '語';
+    var f = keep ? box.querySelector('[data-card="' + keep + '"]') : null;
+    if (focusDel != null) { var dels = $$('.mk-del', box); f = dels[Math.min(focusDel, dels.length - 1)] || $('#q'); }
+    if (f) f.focus({ preventScroll: true });
+  }
+  function csvCell(s) {
+    s = String(s == null ? '' : s);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  /* 用語,解説 in the history's order; the BOM lets Excel read it as UTF-8 */
+  function histCSV() {
+    var rows = [['用語', '解説']];
+    HIST.forEach(function (no) { var c = M.byNo[no]; if (c) rows.push([c.disp, c.ex]); });
+    return '﻿' + rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';
+  }
+  function doHistCSV() {
+    if (!HIST.length) { toast('履歴はまだありません'); return; }
+    var data = histCSV();
+    saveFile('世界史用語ドリル_用語集の履歴_' + dayKey() + '.csv', data, 'text/csv').then(function (res) {
+      if (res === 'saved') toast('履歴をCSVファイルで保存しました');
+      if (res) return;
+      // no way to save a file here: the text goes to the clipboard instead
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(data.slice(1)).then(function () { toast('保存できなかったので、CSVの中身をコピーしました'); }, function () { toast('CSVファイルを保存できませんでした'); });
+      } else toast('CSVファイルを保存できませんでした');
+    });
   }
 
   /* ================= term sheet (modal) ================= */
@@ -5739,6 +5941,7 @@ var WSD = (function () {
   function openCard(i) {
     var c = M.cards[i];
     if (!c) return;
+    if (state.view === 'search') addHist(c); // a term opened in the glossary goes into its history
     var st = stOf(c);
     $('#modal-body').innerHTML = metaHTML(c, true) +
       '<h2 class="fc-term" id="modal-term">' + termHTML(c) + '</h2>' +
@@ -5784,6 +5987,8 @@ var WSD = (function () {
       else if (state.view === 'deck') renderDeck(state.deck, { keepScroll: true });
       else if (state.view === 'flash') refreshCardMeta();
     }
+    // the history is drawn again only now, so the chip the sheet was opened from is still there to take the focus back
+    if (histDirty) refreshHist();
   }
   /* marks and decks for one card: toggles for each, plus a form that makes a new one */
   function orgHTML(c) {
@@ -5939,33 +6144,36 @@ var WSD = (function () {
   /* ================= backup ================= */
   function exportData() {
     saveLocal();
-    return JSON.stringify({ app: 'world-history-term-drill', v: 1, exportedAt: new Date().toISOString(), resetAt: RESET_AT, p: P, d: DAYS, lists: L });
+    return JSON.stringify({ app: 'world-history-term-drill', v: 1, exportedAt: new Date().toISOString(), resetAt: RESET_AT, p: P, d: DAYS, lists: L, hist: H });
   }
-  function doExport() {
-    var data = exportData();
-    var name = '世界史用語ドリル_進捗_' + dayKey() + '.json';
-    capUse('downloads').then(function (dl) {
+  /* hand a file to the viewer: 'saved', 'handled' (declined or told to wait), or false when this page cannot save files */
+  function saveFile(name, data, type) {
+    return capUse('downloads').then(function (dl) {
       if (dl) {
-        return Promise.resolve(dl.save({ filename: name, data: data })).then(function () { toast('バックアップを書き出しました'); return true; }, function (e) {
-          if (e && e.code === 'declined') return true;
-          if (e && e.code === 'rate_limited') { toast('少し待ってからもう一度押してください'); return true; }
+        return Promise.resolve(dl.save({ filename: name, data: data })).then(function () { return 'saved'; }, function (e) {
+          if (e && e.code === 'declined') return 'handled';
+          if (e && e.code === 'rate_limited') { toast('少し待ってからもう一度押してください'); return 'handled'; }
           return false;
         });
       }
       return false;
-    }).then(function (handled) {
-      if (handled) return;
-      if (!window.claude) {
-        try {
-          var url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
-          var a = document.createElement('a');
-          a.href = url; a.download = name;
-          document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
-          toast('バックアップを書き出しました');
-          return;
-        } catch (e) { /* fall through */ }
-      }
+    }).then(function (res) {
+      if (res || window.claude) return res;
+      try {
+        var url = URL.createObjectURL(new Blob([data], { type: type }));
+        var a = document.createElement('a');
+        a.href = url; a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+        return 'saved';
+      } catch (e) { return false; }
+    });
+  }
+  function doExport() {
+    var data = exportData();
+    saveFile('世界史用語ドリル_進捗_' + dayKey() + '.json', data, 'application/json').then(function (res) {
+      if (res === 'saved') toast('バックアップを書き出しました');
+      if (res) return;
       var box = $('#export-box'), ta = $('#export-text');
       if (box && ta) { box.hidden = false; ta.value = data; ta.focus(); ta.select(); }
     });
@@ -5990,6 +6198,10 @@ var WSD = (function () {
         }
       });
       if (o.lists && typeof o.lists === 'object') mergeLists(cleanLists(o.lists));
+      if (o.hist && typeof o.hist === 'object') {
+        var mh = mergeHist(H, cleanHist(o.hist));
+        if (histKey(mh) !== histKey(H)) { setHist(mh); saveHist(); }
+      }
       if (o.d && typeof o.d === 'object') {
         Object.keys(o.d).forEach(function (k) {
           var v = o.d[k];
@@ -7182,9 +7394,27 @@ var WSD = (function () {
     more: function () { state.limit += 60; runSearch(); },
     // × in the glossary search bar: empties the bar only; the list changes on the next 検索
     'clear-q': function () {
-      var qi = $('#q'), cb = $('#clear-q');
+      var qi = $('#q'), cb = $('#clear-q'), hb = $('#gl-hist');
       if (qi) { qi.value = ''; qi.focus(); }
       if (cb) cb.hidden = true;
+      if (hb) hb.hidden = false;
+    },
+    'hist-csv': function () { doHistCSV(); },
+    'hist-del': function (el) {
+      var k = $$('#gl-hist .mk-del').indexOf(el);
+      dropHist(+el.getAttribute('data-no'));
+      refreshHist(Math.max(0, k));
+    },
+    'hist-all': function () { histAll = true; refreshHist(); },
+    'hist-clear-ask': function () { var c = $('#hist-confirm'); if (c) { c.hidden = false; c.querySelector('.danger').focus(); } },
+    'hist-clear-cancel': function () { var c = $('#hist-confirm'); if (c) c.hidden = true; },
+    'hist-clear-do': function () {
+      histAll = false;
+      clearHist();
+      refreshHist();
+      var qi = $('#q');
+      if (qi) qi.focus({ preventScroll: true });
+      toast('用語集の履歴を消しました');
     },
     'modal-close': function () { closeModal(); },
     mark: function (el) { markFromModal(+el.getAttribute('data-i'), +el.getAttribute('data-st')); },
@@ -7221,7 +7451,7 @@ var WSD = (function () {
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-act],[data-nav],[data-card]');
     if (!t || !M) return;
-    if (t.hasAttribute('data-nav')) { go(t.getAttribute('data-nav')); return; }
+    if (t.hasAttribute('data-nav')) { go(t.getAttribute('data-nav'), t.classList.contains('tab')); return; }
     if (t.hasAttribute('data-card') && !t.hasAttribute('data-act')) { e.stopPropagation(); openCard(+t.getAttribute('data-card')); return; }
     var fn = ACTS[t.getAttribute('data-act')];
     if (fn) {
@@ -7318,11 +7548,12 @@ var WSD = (function () {
   window.addEventListener('resize', moveTabInd);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(moveTabInd);
   moveTabInd();
-  // glossary search: typing only shows or hides the ×; 検索 (or Enter) runs it
+  // glossary search: typing only shows or hides the × and the history; 検索 (or Enter) runs it
   document.addEventListener('input', function (e) {
     if (e.target.id !== 'q') return;
-    var cb = $('#clear-q');
+    var cb = $('#clear-q'), hb = $('#gl-hist');
     if (cb) cb.hidden = !e.target.value;
+    if (hb) hb.hidden = !!e.target.value.trim();
   });
   document.addEventListener('submit', function (e) {
     var f = e.target;
@@ -7332,7 +7563,10 @@ var WSD = (function () {
     var qi = $('#q');
     state.q = qi ? qi.value.trim() : '';
     state.limit = 60;
-    runSearch();
+    var r = runSearch();
+    // a word that is a term's own name counts as looking that term up
+    if (r) r.items.filter(function (it) { return it.exact && !it.tier; }).slice(0, 5).reverse().forEach(function (it) { addHist(it.c); });
+    if (histDirty) refreshHist();
   });
   // print search: typing only shows or hides the ×; 検索 (or Enter) runs it
   document.addEventListener('input', function (e) {
@@ -7398,7 +7632,7 @@ var WSD = (function () {
     }
     if (state.view === 'search' && k === 'escape') {
       e.preventDefault();
-      if (typing && t.id === 'q' && t.value) ACTS['clear-q'](); else renderHome();
+      if (typing && t.id === 'q' && t.value) ACTS['clear-q'](); else go('home', true);
       return;
     }
     if ((state.view === 'pluses' || state.view === 'fts') && k === 'escape') { e.preventDefault(); renderHome(); return; }
@@ -7515,6 +7749,7 @@ var WSD = (function () {
       else if (state.view === 'search') runSearch();
       return;
     }
+    if (e.key === NS + 'hist') { setHist(mergeHist(H, cleanHist(LS.get('hist')))); refreshHist(); return; }
     if (e.key !== NS + 'p' && e.key !== NS + 'r') return;
     if (mergeFromStore() && state.view === 'home') renderHome({ keepScroll: true });
   });
@@ -7543,6 +7778,7 @@ var WSD = (function () {
       M = W.build(D);
       loadLocal();
       loadLists();
+      loadHist();
       loadSettings();
       if (!canLocal) setSync('nostore');
       var restored = false;
@@ -7574,6 +7810,8 @@ var WSD = (function () {
         else if (state.view === 'deck') {
           if (deckById(state.deck)) renderDeck(state.deck, { keepScroll: true }); else renderHome();
         }
+        // with a term's sheet open, the history is drawn again when the sheet closes
+        else if (state.view === 'search' && histDirty && $('#modal').hidden) refreshHist();
       };
       watchAuth(Cloud.onChange);
     }).catch(fatal);
