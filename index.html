@@ -493,6 +493,7 @@ kbd {
 .act-head .eyebrow { margin: 0; }
 .act-sum { margin: 0; font-size: 13px; color: var(--ink-3); }
 .act-sum b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.act-kinds { margin-top: 8px; }
 .act-chart {
   position: relative;
   display: grid;
@@ -4123,8 +4124,12 @@ var WSD = (function () {
   /* ================= progress ================= */
   // P[no] = [status 0|1|2, flash judgements, test right, test wrong, last test 1|0|-1, updated (ms since 2024)]
   var P = {};
-  // DAYS['YYYYMMDD'] = [cards judged, cards marked 覚えた, questions answered, answered right]
+  // DAYS['YYYYMMDD'] = [cards judged, cards marked 覚えた, questions answered, answered right,
+  //                     blanks opened on プリント, on 世界史探究＋, on 5分テスト]; rows from before the blanks are padded
   var DAYS = {};
+  var DAY_N = 7, DAY_PR = 4, DAY_PX = 5, DAY_FT = 6;
+  function dayNew() { return [0, 0, 0, 0, 0, 0, 0]; }
+  function dayClean(a) { return dayNew().map(function (z, i) { return Math.max(0, Number(a[i]) || 0); }); }
   var RESET_AT = 0;
 
   function cleanEntry(e) {
@@ -4141,7 +4146,7 @@ var WSD = (function () {
     if (p && typeof p === 'object') Object.keys(p).forEach(function (no) { var e = cleanEntry(p[no]); if (e && validNo(no)) P[no] = e; });
     var d = LS.get('d');
     if (d && typeof d === 'object') Object.keys(d).forEach(function (k) {
-      if (/^\d{8}$/.test(k) && Array.isArray(d[k])) DAYS[k] = d[k].slice(0, 4).map(function (x) { return Math.max(0, Number(x) || 0); });
+      if (/^\d{8}$/.test(k) && Array.isArray(d[k])) DAYS[k] = dayClean(d[k]);
     });
     RESET_AT = Number(LS.get('r')) || 0;
   }
@@ -4165,8 +4170,8 @@ var WSD = (function () {
     var d = LS.get('d');
     if (d && typeof d === 'object') Object.keys(d).forEach(function (k) {
       if (!/^\d{8}$/.test(k) || !Array.isArray(d[k])) return;
-      var l = DAYS[k] || (DAYS[k] = [0, 0, 0, 0]);
-      for (var i = 0; i < 4; i++) { var v = Math.max(0, Number(d[k][i]) || 0); if (v > l[i]) { l[i] = v; changed = true; } }
+      var l = DAYS[k] || (DAYS[k] = dayNew());
+      for (var i = 0; i < DAY_N; i++) { var v = Math.max(0, Number(d[k][i]) || 0); if (v > l[i]) { l[i] = v; changed = true; } }
     });
     return changed;
   }
@@ -4189,7 +4194,7 @@ var WSD = (function () {
   function touch(no) { scheduleSave(); Cloud.mark(no); }
   function bump(idx, k) {
     var key = dayKey();
-    var d = DAYS[key] || (DAYS[key] = [0, 0, 0, 0]);
+    var d = DAYS[key] || (DAYS[key] = dayNew());
     d[idx] = Math.max(0, d[idx] + k);
     scheduleSave(); Cloud.markDays();
   }
@@ -4756,8 +4761,8 @@ var WSD = (function () {
       Object.keys(rd).forEach(function (key) {
         var r = rd[key];
         if (!/^\d{8}$/.test(key) || !Array.isArray(r)) return;
-        var l = DAYS[key] || (DAYS[key] = [0, 0, 0, 0]);
-        for (var i = 0; i < 4; i++) l[i] = Math.max(l[i], Number(r[i]) || 0);
+        var l = DAYS[key] || (DAYS[key] = dayNew());
+        for (var i = 0; i < DAY_N; i++) l[i] = Math.max(l[i], Number(r[i]) || 0);
       });
     }
     if (JSON.stringify(DAYS) !== before) changed = true;
@@ -5035,31 +5040,37 @@ var WSD = (function () {
     base.setHours(12, 0, 0, 0);
     for (var i = 13; i >= 0; i--) {
       var d = new Date(base); d.setDate(base.getDate() - i);
-      var v = DAYS[dayKey(d)] || [0, 0, 0, 0];
-      days.push({ d: d, cards: v[0], tests: v[2], total: v[0] + v[2] });
+      var v = DAYS[dayKey(d)] || dayNew();
+      days.push({ d: d, cards: v[0], tests: v[2], pr: v[DAY_PR], px: v[DAY_PX], ft: v[DAY_FT], total: dayTotal(v) });
     }
     var max = Math.max.apply(null, days.map(function (x) { return x.total; }).concat([1]));
     var week = days.slice(7).reduce(function (a, x) { return a + x.total; }, 0);
     var today = days[13];
+    function sum(k) { return days.reduce(function (a, x) { return a + x[k]; }, 0); }
     var cols = days.map(function (x, i) {
       var h = x.total ? Math.max(5, Math.round(x.total / max * 100)) : 0;
       var label = (x.d.getMonth() + 1) + '月' + x.d.getDate() + '日（' + WD[x.d.getDay()] + '）';
       var side = i < 3 ? ' tl' : i > 10 ? ' tr' : '';
+      var blanks = [['プリント', x.pr], ['世界史探究＋', x.px], ['5分テスト', x.ft]].filter(function (b) { return b[1]; }).map(function (b) {
+        return '<br>' + b[0] + ' 空欄' + b[1];
+      }).join('');
       var val = (i === 13 && x.total) ? '<span class="act-val" style="bottom:calc(' + h + '% + 3px)">' + x.total + '</span>' : '';
-      return '<div class="act-col' + (i === 13 ? ' today' : '') + side + '" style="--i:' + i + '" role="listitem" tabindex="0" aria-label="' + label + '　暗記カード' + x.cards + '枚、テスト' + x.tests + '問">' +
+      return '<div class="act-col' + (i === 13 ? ' today' : '') + side + '" style="--i:' + i + '" role="listitem" tabindex="0" aria-label="' + label + '　暗記カード' + x.cards + '枚、テスト' + x.tests + '問、空欄はプリント' + x.pr + '、世界史探究＋' + x.px + '、5分テスト' + x.ft + '">' +
         (h ? '<i class="act-bar" style="height:' + h + '%"></i>' : '') + val +
-        '<span class="tip" aria-hidden="true"><b>' + x.total + '</b>カード ' + x.cards + '枚・テスト ' + x.tests + '問<br>' + label + '</span></div>';
+        '<span class="tip" aria-hidden="true"><b>' + x.total + '</b>カード ' + x.cards + '枚・テスト ' + x.tests + '問' + blanks + '<br>' + label + '</span></div>';
     }).join('');
     var labels = days.map(function (x, i) { return '<span' + (i === 13 ? ' class="today"' : '') + '>' + (i === 13 ? '今日' : x.d.getDate()) + '</span>'; }).join('');
     return '<div class="ov-act"><div class="act-head"><p class="eyebrow">LAST 14 DAYS — 最近14日の学習</p>' +
       '<p class="act-sum">今日 <b>' + fmt(today.total) + '</b>・7日間 <b>' + fmt(week) + '</b>・連続 <b>' + streak() + '</b>日</p></div>' +
-      '<div class="act-chart" role="list" aria-label="1日ごとに判定したカードと解いた問題の数">' + cols +
-      (days.every(function (x) { return !x.total; }) ? '<p class="act-empty">カードを判定したり問題を解いたりすると、1日ごとの量がここに並びます。</p>' : '') + '</div>' +
-      '<div class="act-days" aria-hidden="true">' + labels + '</div></div>';
+      '<div class="act-chart" role="list" aria-label="1日ごとに判定したカード、解いた問題、開いた空欄の数">' + cols +
+      (days.every(function (x) { return !x.total; }) ? '<p class="act-empty">カードを判定したり、問題を解いたり、プリントの空欄を開いたりすると、1日ごとの量がここに並びます。</p>' : '') + '</div>' +
+      '<div class="act-days" aria-hidden="true">' + labels + '</div>' +
+      '<p class="act-sum act-kinds">14日間に開いた空欄　プリント <b>' + fmt(sum('pr')) + '</b>・世界史探究＋ <b>' + fmt(sum('px')) + '</b>・5分テスト学習 <b>' + fmt(sum('ft')) + '</b></p></div>';
   }
+  function dayTotal(v) { return v[0] + v[2] + v[DAY_PR] + v[DAY_PX] + v[DAY_FT]; }
   function streak() {
     var d = new Date(); d.setHours(12, 0, 0, 0);
-    function active(x) { var v = DAYS[dayKey(x)]; return !!v && (v[0] + v[2]) > 0; }
+    function active(x) { var v = DAYS[dayKey(x)]; return !!v && dayTotal(v) > 0; }
     if (!active(d)) d.setDate(d.getDate() - 1);
     var n = 0;
     while (active(d) && n < 4000) { n++; d.setDate(d.getDate() - 1); }
@@ -6218,8 +6229,8 @@ var WSD = (function () {
         Object.keys(o.d).forEach(function (k) {
           var v = o.d[k];
           if (!/^\d{8}$/.test(k) || !Array.isArray(v)) return;
-          var l = DAYS[k] || (DAYS[k] = [0, 0, 0, 0]);
-          for (var i = 0; i < 4; i++) l[i] = Math.max(l[i], Number(v[i]) || 0);
+          var l = DAYS[k] || (DAYS[k] = dayNew());
+          for (var i = 0; i < DAY_N; i++) l[i] = Math.max(l[i], Number(v[i]) || 0);
         });
         Cloud.markDays();
       }
@@ -6266,7 +6277,7 @@ var WSD = (function () {
   var RD = null;
   var RDO = null; // the boxes shown on this page, in the order they were shown (A takes back the last)
   var RD_PR = {
-    what: 'プリント', act: 'print-open', hits: true, cats: PR_CATS, on: PS.cat, save: function () { prSave(); },
+    what: 'プリント', act: 'print-open', day: DAY_PR, hits: true, cats: PR_CATS, on: PS.cat, save: function () { prSave(); },
     step: function (d) { var p = PR && PR.byNo[PS.no]; return p && PR[p.k + d]; },
     show: function (q) { renderPrint(q.no); }, back: function () { renderPrints(); }
   };
@@ -6740,6 +6751,8 @@ var WSD = (function () {
     if (on === el.classList.contains('is-shown')) return;
     el.classList.toggle('is-shown', on);
     prSetAria(el);
+    // the day log: once per blank each time its page is opened, so showing and hiding again adds nothing
+    if (on && !el.hasAttribute('data-seen')) { el.setAttribute('data-seen', ''); bump(RD.day, 1); }
     var O = RDO;
     if (!O) return;
     O.order = O.order.filter(function (x) { return x !== el; });
@@ -6828,7 +6841,7 @@ var WSD = (function () {
   var PX_CATS = [['n', '空欄'], ['s', '★ 特進のみ'], ['m', '地図の記号']];
   var PX_MARK = /^([◆□■▢◎○●])\s*/;
   var RD_PX = {
-    what: 'シート', act: 'plus-open', cats: PX_CATS, on: XS.cat, save: function () { pxSave(); },
+    what: 'シート', act: 'plus-open', day: DAY_PX, cats: PX_CATS, on: XS.cat, save: function () { pxSave(); },
     step: function (d) { return PX && PX[XS.no - 1 + d]; },
     show: function (q) { renderPlus(q.no); }, back: function () { renderPluses(); }
   };
@@ -7044,7 +7057,7 @@ var WSD = (function () {
   var FT_ZOOM = [[1, '標準'], [1.5, '1.5倍'], [2, '2倍']];
   var FT_COLS = ['k', 'c'];
   var RD_FT = {
-    what: 'テスト', act: 'ft-open', cats: [], on: FS.cat, save: function () { ftSave(); },
+    what: 'テスト', act: 'ft-open', day: DAY_FT, cats: [], on: FS.cat, save: function () { ftSave(); },
     step: function (d) { return FT && FT[FS.no - 1 + d]; },
     show: function (q) { renderFt(q.no); }, back: function () { renderFts(); }
   };
