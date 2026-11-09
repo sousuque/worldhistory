@@ -1550,6 +1550,10 @@ mark { background: var(--mark); color: var(--ink); padding: 0 1px; }
 .fq-panel { margin: 14px 0 18px; }
 .fq-h { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: 0.08em; }
 .fq-panel .opt { grid-template-columns: 3.2em minmax(0, 1fr); margin-top: 10px; }
+.xq-hole { font-weight: 700; color: var(--accent); }
+.xq-h { color: var(--ink-3); }
+.xq-fig { margin-top: 12px; background: #fff; border: 1px solid var(--card-line); }
+.xq-fig img { display: block; max-width: 100%; max-height: 300px; width: auto; height: auto; margin: 0 auto; }
 .fq-l { display: inline-block; margin-right: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.1em; color: var(--ink-3); }
 .ft-zoom.opt { grid-template-columns: auto minmax(0, 1fr); }
 .ft-doc { margin-top: 18px; }
@@ -7274,6 +7278,7 @@ var WSD = (function () {
     show('<div class="wrap prints"><p class="eyebrow" lang="en">PLUS SHEETS</p>' +
       '<div class="dk-title"><h1 class="page-h">世界史探究＋</h1><div class="tools"><button type="button" class="link" data-act="home">ホームへ</button></div></div>' +
       '<p class="search-info">全<b>' + PX.length + '</b>枚。空欄の番号は確認表と同じです（★は特進コースのみ必須）。</p>' +
+      xqPanelHTML(0) +
       '<ol class="pr-grid">' + (PX.length ? PX.map(pxCardHTML).join('') : '<li class="pr-none"><p>世界史探究＋のデータが見つかりませんでした。</p></li>') + '</ol></div>', opts);
   }
   function pxCardHTML(p) {
@@ -7299,6 +7304,7 @@ var WSD = (function () {
       (next ? '<button type="button" class="link" data-act="plus-open" data-no="' + next.no + '">次のシート →</button>' : '') +
       '<button type="button" class="link" data-act="pluses">シート一覧</button></div></div>' +
       '<p class="pr-ref">一覧表（答え入り）の文字起こし。空欄の番号は確認表と同じです' + (nf ? '<span class="pr-nf">図版 ' + nf + '点（押すと拡大）</span>' : '') + '</p>' +
+      xqPanelHTML(p.no) +
       (cats.length ? rdCatsHTML(cats, R) : '') + rdKeysHTML() +
       '<article class="pr-doc px-doc" id="pr-doc">' + doc + '</article>' +
       '<nav class="pr-pager" aria-label="前後のシート">' +
@@ -7331,7 +7337,7 @@ var WSD = (function () {
     var h = '<section class="panel menu pr-menu menu-px" aria-labelledby="xm-h"><p class="eyebrow" lang="en">PLUS SHEETS</p><h2 id="xm-h" class="menu-h">世界史探究＋</h2>';
     if (!PX.length) return h + '<p class="dk-empty">世界史探究＋のデータが見つかりませんでした。</p></section>';
     var last = PX[XS.last - 1];
-    return h + '<p class="dk-empty">「世界史探究＋」' + PX.length + '枚の一覧表を文字起こししました。確認表と同じ番号の空欄を、隠したり表示したりしながら覚えられます。★の語句（特進コースのみ必須）は隠さずにおくこともできます。</p>' +
+    return h + '<p class="dk-empty">「世界史探究＋」' + PX.length + '枚の一覧表を文字起こししました。確認表と同じ番号の空欄を、隠したり表示したりしながら覚えられます。★の語句（特進コースのみ必須）は隠さずにおくこともできます。空欄を1問ずつ出す一問一答もあります。</p>' +
       '<button type="button" class="btn primary go" data-act="pluses"><span>シート一覧を開く</span><span class="go-n">' + PX.length + '枚</span></button>' +
       (last ? '<p class="pm-last"><span class="opt-l">前回</span><button type="button" class="link" data-act="plus-open" data-no="' + last.no + '">' + esc(last.title) + '</button></p>' : '') +
       '</section>';
@@ -7516,6 +7522,7 @@ var WSD = (function () {
   }
   function fqKnown(t) { fqLoad(); return fqAll(t).filter(function (q) { return FQR[q.key] === 1; }).length; }
   function fqView(q) {
+    if (q.x) return xqView(q);
     var t = FT[q.no - 1], r = t.rows[q.i], kd = fqKinds(t)[q.k] || fqKinds(t)[0], ans = fqClean(r[kd.a]), lines = [];
     kd.h.forEach(function (m) {
       if (!r[m]) return;
@@ -7550,9 +7557,10 @@ var WSD = (function () {
       }).join('') + '</div></div>' +
       '<div class="pe-go"><button type="button" class="btn primary go" data-act="fq-start" data-no="' + t.no + '"' + (n ? '' : ' disabled') + '><span>一問一答を始める</span><span class="go-n">' + n + '問</span></button></div></section>';
   }
-  function fqBegin(no, qs) {
-    var t = FT[no - 1];
-    FQ.s = { no: no, qs: qs.map(function (q) { return { no: q.no, i: q.i, j: q.j, k: q.k, key: q.key }; }), pos: 0, t0: Date.now(), label: '5分テスト・' + t.title };
+  /* o: x for a 世界史探究＋ session (no 0 = every sheet) and its label; a retry passes the session it repeats */
+  function fqBegin(no, qs, o) {
+    o = o || {};
+    FQ.s = { no: no, x: !!o.x, qs: qs.map(function (q) { return { no: q.no, i: q.i, j: q.j, k: q.k, key: q.key, x: q.x || !!o.x, idx: q.idx }; }), pos: 0, t0: Date.now(), label: o.label || '5分テスト・' + FT[no - 1].title };
     renderFqSess();
   }
   function fqStart(no) {
@@ -7577,7 +7585,7 @@ var WSD = (function () {
       '<span class="t-n">まだ <b>' + T.qs.filter(function (x) { return x.ok === false; }).length + '</b></span></div>' +
       '<article class="fcard qcard' + (open ? ' is-revealed' : reducedMotion() ? '' : ' enter') + '"><div class="fc-meta"><span class="cat">' + esc(v.cat) + '</span>' + (v.cls ? '<span class="cls">' + esc(v.cls) + '</span>' : '') + '</div>' +
       '<p class="fc-prompt">' + esc(v.ask) + '</p>' +
-      '<div class="lines"><p class="fc-ex">' + v.body + '</p></div>' +
+      (v.body ? '<div class="lines"><p class="fc-ex">' + v.body + '</p></div>' : '') + (v.fig || '') +
       (open ? '<p class="pe-ans" role="status">' + esc(v.ans) + (v.star ? '<span class="pr-star" title="重要">★</span>' : '') + '</p>' : '') + '</article>';
     h += open ? '<div class="next-row pe-judge"><button type="button" class="btn" data-act="fq-judge" data-ok="0">まだ <kbd>A</kbd></button><button type="button" class="btn primary" data-act="fq-judge" data-ok="1">覚えた <kbd>D</kbd></button></div>'
       : '<div class="next-row"><button type="button" class="btn primary" data-act="fq-show">答えを見る <kbd>Space</kbd></button></div>';
@@ -7588,7 +7596,8 @@ var WSD = (function () {
     var q = fqCur();
     if (!q || !q.shown || q.done) return;
     q.done = true; q.ok = ok;
-    FQR[q.key] = ok ? 1 : 0; fqSave();
+    if (q.x) { xqLoad(); XQR[q.key] = ok ? 1 : 0; xqSave(); }
+    else { FQR[q.key] = ok ? 1 : 0; fqSave(); }
     bump(DAY_QA, 1);
     FQ.s.pos++;
     renderFqSess();
@@ -7597,19 +7606,240 @@ var WSD = (function () {
     var T = FQ.s, n = T.qs.length;
     state.view = 'fqDone'; setNav(null);
     var ok = T.qs.filter(function (q) { return q.ok; }).length, wrong = n - ok, rate = n ? Math.round(ok / n * 100) : 0;
-    show('<div class="wrap sess done"><div class="done-head"><p class="eyebrow">5-MINUTE TEST — 一問一答</p>' +
+    show('<div class="wrap sess done"><div class="done-head"><p class="eyebrow">' + (T.x ? 'PLUS — 世界史探究＋・一問一答' : '5-MINUTE TEST — 一問一答') + '</p>' +
       '<div class="score" aria-label="' + n + '問中' + ok + '問覚えた"><span class="score-n">' + ok + '</span><span class="score-d">/ ' + n + '</span></div>' +
       '<p class="done-sub">' + esc(T.label) + '・覚えた割合 ' + rate + '%・' + minutes(T.t0) + '</p></div>' +
       '<div class="done-actions" style="margin-top:22px">' +
       (wrong ? '<button type="button" class="btn primary" data-act="fq-retry">まだの' + wrong + '問をやり直す</button>' : '') +
-      '<button type="button" class="btn' + (wrong ? '' : ' primary') + '" data-act="fq-start" data-no="' + T.no + '">同じ設定でもう一度</button>' +
-      '<button type="button" class="btn quiet" data-act="ft-open" data-no="' + T.no + '">表へ戻る</button></div>' +
+      '<button type="button" class="btn' + (wrong ? '' : ' primary') + '" data-act="' + (T.x ? 'xq-start' : 'fq-start') + '" data-no="' + T.no + '">同じ設定でもう一度</button>' +
+      (T.x ? '<button type="button" class="btn quiet" data-act="' + (T.no ? 'plus-open' : 'pluses') + '" data-no="' + T.no + '">' + (T.no ? 'シートへ戻る' : 'シート一覧へ戻る') + '</button></div>'
+        : '<button type="button" class="btn quiet" data-act="ft-open" data-no="' + T.no + '">表へ戻る</button></div>') +
       '<h2 class="h2">答え合わせ</h2><ol class="review">' + T.qs.map(function (q) {
         var v = fqView(q);
         return '<li><span class="rv-mark">' + (q.ok ? MARK_OK : MARK_NG) + '<span class="sr-only">' + (q.ok ? '覚えた' : 'まだ') + '</span></span>' +
           '<span class="rv-term">' + esc(v.ans) + '</span><span></span>' +
           '<p class="pe-rv">' + (v.cls ? esc(v.cls) + '　' : '') + v.body.replace(/<br>/g, '　') + '</p></li>';
       }).join('') + '</ol></div>');
+  }
+
+  /* ================= 世界史探究＋の一問一答 ================= */
+  /* Every blank of a 世界史探究＋ sheet is a question, numbered like the 確認表 (①…, ★ for 特進のみ, (Ａ) for a map
+     letter). The hint is where the blank stands: in a table, the cells of its row (and of the rows it spans) under
+     their column heads; in the text, its line with the item it belongs to (◆ / □ …) before a "⇒" line, or the
+     "⇒" lines after an item. The answer is 〔　〕 there and other blanks are filled in. A map letter or a row headed
+     by a letter shows the last figure before it, and a blank in a cell with a figure shows that figure.
+     The last judgement is XQR['<sheet>:<blank>'] = 1 覚えた or 0 まだ (LS 'pxq-r'); the options are in LS 'pxq'.
+     A session runs on the 5分テスト screens (FQ.s with x set). */
+  var XQ = { order: 'shuf', wrong: false, star: true };
+  var XQR = null;
+  var XQ_HOLE = '\u0001'; // stands for the answer's place until the line is escaped
+  function xqLoad() {
+    pxLoad();
+    if (XQR) return;
+    var r = LS.get('pxq-r'); XQR = {};
+    if (r && typeof r === 'object') Object.keys(r).forEach(function (k) { if (r[k] === 0 || r[k] === 1) XQR[k] = r[k]; });
+    var o = LS.get('pxq');
+    if (o && typeof o === 'object') {
+      if (o.order === 'seq' || o.order === 'shuf') XQ.order = o.order;
+      if (typeof o.wrong === 'boolean') XQ.wrong = o.wrong;
+      if (typeof o.star === 'boolean') XQ.star = o.star;
+    }
+  }
+  function xqSave() { LS.set('pxq', { order: XQ.order, wrong: XQ.wrong, star: XQ.star }); LS.set('pxq-r', XQR); }
+
+  /* a blank's parts, as pxBlank reads them; C.n is the number of the last numbered blank */
+  function xqBlank(raw, C) {
+    var m = /^(?:(\d+)|@([^:]+)):([\s\S]+)$/.exec(raw), s = m ? m[3] : raw, star = s.indexOf('★') >= 0;
+    s = s.replace(/★/g, '').trim();
+    if (m && m[2]) return { s: s, lab: m[2], cat: 'm', star: false };
+    C.n = m ? +m[1] : C.n + 1;
+    return { s: s, lab: pxNum(C.n), cat: star ? 's' : 'n', star: star };
+  }
+  /* a piece of the sheet as plain text: blanks filled in, the one at ordinal hole left as XQ_HOLE */
+  function xqText(s, base, hole) {
+    var k = base;
+    s = s.replace(/〈(\{[^{}]*\})〉/g, '$1').replace(/[［\[](\{[^{}]*\})[］\]]/g, '$1');
+    s = s.replace(/\{([^{}]*)\}/g, function (all, raw) {
+      var i = k++, m = /^(?:\d+|@[^:]+):([\s\S]+)$/.exec(raw), w = (m ? m[1] : raw).replace(/★/g, '').trim();
+      return i === hole ? XQ_HOLE : w;
+    });
+    return s.replace(/[〈〉]/g, '').replace(/__/g, '').replace(/!\[[^\]]+\]/g, '').replace(/~%?/g, ' ').replace(/^%/, '')
+      .trim().replace(/^(#{1,2}|[>=!])\s*/, '').replace(PX_MARK, '').replace(/^⇒\s*/, '').replace(/\s+/g, ' ').trim();
+  }
+  function xqCount(s) { return (s.match(/\{[^{}]*\}/g) || []).length; }
+  function xqFigs(s) { var out = [], re = /!\[([^\]]+)\]/g, m; while ((m = re.exec(s))) out.push(m[1]); return out; }
+
+  /* the questions of one sheet, in the order of its blanks */
+  function xqAll(p) {
+    if (p.qs) return p.qs;
+    var C = { n: 0 }, ord = 0, out = [], body = p.body, head = '', sub = '', item = null, fig = '';
+    var subs = body.filter(function (l) { return /^=\s/.test(l.trim()); }).length > 1; // a sheet in parts names each part
+    function add(raw, ctx) {
+      var b = xqBlank(raw, C), i = ord++;
+      out.push({ no: p.no, idx: i, key: p.no + ':' + i, s: b.s, lab: b.lab, cat: b.cat, star: b.star,
+        cls: [sub, head].filter(Boolean).join('／'), lines: ctx(i), fig: '' });
+      return out[out.length - 1];
+    }
+    // an item line and the "⇒" lines that follow it
+    function follows(k) {
+      var r = [];
+      for (var j = k + 1; j < body.length && r.length < 2; j++) {
+        var t = body[j].trim();
+        if (!/^⇒/.test(t)) break;
+        r.push({ t: t, base: 0 });
+      }
+      return r;
+    }
+    for (var k = 0; k < body.length; k++) {
+      var line = body[k], t = line.trim(), m;
+      if (!t) { item = null; continue; } // a gap: what follows no longer hangs on the last item
+      if (line[0] === '|') {
+        var rows = [];
+        while (k < body.length && body[k][0] === '|') rows.push(body[k++]);
+        k--;
+        xqTable(rows);
+        continue;
+      }
+      if ((m = /^!\[([^\]]+)\]/.exec(t))) { fig = m[1]; continue; }
+      if ((m = /^=\s*(.+?)(?:\s+\|\s+.+)?$/.exec(t))) {
+        var st = pxPlain(m[1]);
+        sub = subs ? st : '';
+        head = ''; item = null;
+        if (!xqCount(t)) continue;
+      }
+      var isHead = /^#{1,2}\s/.test(t);
+      if (/^#\s/.test(t)) { head = pxPlain(t.replace(/^#\s+/, '')); item = null; }
+      var n = xqCount(t), base = ord, arrow = /^⇒/.test(t);
+      if (n) {
+        var before = arrow && item ? [item] : [], after = arrow ? [] : follows(k), qsHere = [];
+        for (var c = 0, re = /\{([^{}]*)\}/g, bm; (bm = re.exec(t)); c++) {
+          qsHere.push(add(bm[1], function (i) {
+            return before.concat([{ t: t, base: base, hole: i, me: true }], after);
+          }));
+        }
+        // a line that leads into a figure ("… ↓") asks with the figure
+        for (var j = k + 1; j < body.length && !body[j].trim(); j++);
+        var nf = j < body.length && /^!\[([^\]]+)\]/.exec(body[j].trim());
+        if (nf && /↓\s*$/.test(t)) qsHere.forEach(function (q) { q.fig = nf[1]; });
+      }
+      if (!arrow && !isHead && (PX_MARK.test(t) || n)) item = { t: t, base: base };
+    }
+    out.forEach(function (q) { q.ask = q.cat === 'm' ? '地図の' + q.lab + 'にあてはまる語句は？' : '空欄' + q.lab + (q.star ? '★' : '') + 'にあてはまる語句は？'; });
+    p.qs = out;
+    return out;
+
+    // a table: the cells as pxTableHTML lays them out, '^' standing for the cell above and '<' for the cell to the left
+    function xqTable(rows) {
+      var grid = rows.map(function (l) { return l.replace(/^\|/, '').replace(/\|\s*$/, '').split('|'); }), heads = [];
+      var cells = grid.map(function (r) { return r.map(function (s) { return { s: s }; }); });
+      var cols = Math.max.apply(null, cells.map(function (r) { return r.length; }));
+      cells.forEach(function (r, i) {
+        r.forEach(function (c, j) {
+          // a column head names a cell only when the cell keeps to that one column
+          c.one = (j < r.length - 1 ? r[j + 1].s !== '<' : r.length === cols);
+          if (c.s === '^') { for (var a = i - 1; a >= 0; a--) if (cells[a][j] && cells[a][j].s !== '^') { c.up = cells[a][j]; break; } }
+          else if (c.s === '<') c.skip = true;
+        });
+      });
+      // blanks are counted in the order they are written
+      var b = ord;
+      cells.forEach(function (r) { r.forEach(function (c) { c.base = b; b += xqCount(c.s); }); });
+      // a table hangs on the ◆ / □ item above it (地中海商業圏 …), not on a ○ point that only comes before it
+      var tblItem = item && /^[◆□■▢]/.test(item.t) ? item : null;
+      cells.forEach(function (r, i) {
+        if (r.every(function (c) { return c.s[0] === '=' || c.s === '/' || c.s === '<'; }) && !r.some(function (c) { return xqCount(c.s); })) {
+          heads = r.map(function (c) { return c.s[0] === '=' ? pxPlain(c.s.slice(1)) : ''; });
+          return;
+        }
+        if (r.length === 1 && r[0].s[0] === '#') { head = pxPlain(r[0].s.slice(1)); tblItem = null; }
+        // a row of several lettered places (Ａ … Ｂ …) belongs to the map, one place at a time
+        var letters = r.filter(function (c) { return /^![Ａ-Ｚ]$/.test(c.s.trim()); }).length;
+        r.forEach(function (c, j) {
+          if (c.skip || c.up || !xqCount(c.s)) return;
+          var figs = xqFigs(c.s), left = [], right = [], hs = [];
+          function hd(o) { var h = xqText(o.s, o.base, -1); if (h && hs.indexOf(h) < 0) hs.push(h); }
+          function cellLine(x, jj, to, down) {
+            var o = x.up || x;
+            if (o.skip || o.s === '/' || o.s[0] === '=' || o === c) return;
+            if (o.s[0] === '!' || o.s[0] === '#') {
+              // the row's own head, and the head just before the cell
+              if (down || jj === 0 || jj < j && !r.slice(jj + 1, j).some(function (y) { var u = y.up || y; return u.s[0] === '!'; })) hd(o);
+              return;
+            }
+            if ((figs.length || letters > 1) && !down) return; // the other pictures or places would only be noise
+            to.push({ t: o.s, base: o.base, l: o.one ? heads[jj] || '' : '' });
+          }
+          // the cell before an arrow cell is what it follows from
+          if (c.one && /^\s*⇒/.test(c.s) && i > 0 && cells[i - 1][j]) {
+            var pv = cells[i - 1][j].up || cells[i - 1][j];
+            if (!pv.skip && pv.s !== '/' && pv.s[0] !== '!') left.push({ t: pv.s, base: pv.base, l: pv.one ? heads[j] || '' : '' });
+          }
+          r.forEach(function (x, jj) { if (jj < j) cellLine(x, jj, left); else if (jj > j) cellLine(x, jj, right); });
+          // the rows this cell runs down into
+          for (var a = i + 1; a < cells.length && cells[a][j] && cells[a][j].up === c; a++) {
+            cells[a].forEach(function (x, jj) { if (jj !== j && !x.up) cellLine(x, jj, right, true); });
+          }
+          var pre = tblItem ? [tblItem] : [];
+          if (hs.length) pre.push({ t: hs.join('　'), base: 0, h: true });
+          var re = /\{([^{}]*)\}/g, bm;
+          while ((bm = re.exec(c.s))) {
+            var q = add(bm[1], function (hole) {
+              return pre.concat(left, [{ t: c.s, base: c.base, hole: hole, me: true, l: c.one ? heads[j] || '' : '' }], right);
+            });
+            q.fig = figs[0] || (q.cat === 'm' || letters ? fig : '');
+            if (q.cat === 'm') q.lines = pre.slice(); // a map letter is asked from the map alone
+          }
+        });
+      });
+      ord = b;
+    }
+  }
+  function xqQs(list) {
+    xqLoad();
+    return list.filter(function (q) { return (XQ.star || q.cat !== 's') && (!XQ.wrong || XQR[q.key] !== 1); });
+  }
+  function xqSheets(no) { xqLoad(); return no ? [PX[no - 1]].filter(Boolean) : PX; }
+  function xqList(no) { return xqSheets(no).reduce(function (a, p) { return a.concat(xqAll(p)); }, []); }
+  function xqKnown(list) { xqLoad(); return list.filter(function (q) { return XQR[q.key] === 1; }).length; }
+  function xqView(q) {
+    var p = PX[q.no - 1], x = xqAll(p)[q.idx], ans = x.s;
+    var words = ans.split(/[・\s()（）]/).filter(function (w) { return w.length >= 2; });
+    function mask(s) { words.forEach(function (w) { s = s.split(w).join('〔　〕'); }); return s; }
+    var lines = x.lines.map(function (L) {
+      var s = xqText(L.t, L.base, L.me ? L.hole : -1);
+      if (!s) return '';
+      if (!L.h) s = mask(s); // a row head (歴史学 …) keeps its name
+      var h = esc(s).replace(XQ_HOLE, '<span class="xq-hole">〔' + esc(x.lab) + '〕</span>');
+      return (L.l ? '<span class="fq-l">' + esc(L.l) + '</span>' : '') + (L.h ? '<span class="xq-h">' + h + '</span>' : h);
+    }).filter(Boolean);
+    var f = x.fig && pxFig(x.fig);
+    return {
+      cat: p.title, cls: x.cls, ask: x.ask, body: lines.join('<br>'), ans: ans, star: x.star,
+      fig: f ? '<div class="xq-fig"><img src="' + f.src + '" width="' + f.w + '" height="' + f.h + '" alt="' + esc(p.title) + 'の図版" decoding="async"></div>' : ''
+    };
+  }
+  /* the panel on a sheet (no) or on the list of sheets (0) */
+  function xqPanelHTML(no) {
+    xqLoad();
+    var all = xqList(no), n = xqQs(all).length, stars = all.filter(function (q) { return q.cat === 's'; }).length;
+    if (!all.length) return '';
+    function seg(id, l, key, opts) {
+      return '<div class="opt"><span class="opt-l" id="' + id + '">' + l + '</span><div class="seg" role="group" aria-labelledby="' + id + '">' + opts.map(function (o) {
+        return '<button type="button" data-act="xq-set" data-key="' + key + '" data-val="' + o[0] + '" aria-pressed="' + (XQ[key] === o[0]) + '">' + o[1] + '</button>';
+      }).join('') + '</div></div>';
+    }
+    return '<section class="panel fq-panel" aria-labelledby="xq-h"><h2 id="xq-h" class="fq-h">一問一答で覚える' + (no ? '' : '（全シート）') + '</h2>' +
+      '<p class="search-info">空欄を1問ずつ出題します。覚えた問題 <b>' + xqKnown(all) + '</b> / ' + all.length + '問</p>' +
+      (stars ? seg('xq-s-l', '★', 'star', [[true, '★も出す'], [false, '★は出さない']]) : '') +
+      seg('xq-o-l', '順番', 'order', [['shuf', 'シャッフル'], ['seq', 'シートの順']]) +
+      seg('xq-w-l', '範囲', 'wrong', [[false, 'すべて'], [true, 'まだの問題だけ']]) +
+      '<div class="pe-go"><button type="button" class="btn primary go" data-act="xq-start" data-no="' + no + '"' + (n ? '' : ' disabled') + '><span>一問一答を始める</span><span class="go-n">' + n + '問</span></button></div></section>';
+  }
+  function xqStart(no) {
+    var qs = xqQs(xqList(no));
+    if (!qs.length) { toast('この条件の問題はありません'); return; }
+    var p = no && PX[no - 1];
+    fqBegin(no, XQ.order === 'shuf' ? W.shuffle(qs) : qs, { x: true, label: '世界史探究＋・' + (p ? p.title : '全シート') });
   }
 
   /* ================= 国ごと人物の復習 ================= */
@@ -8338,10 +8568,22 @@ var WSD = (function () {
     'fq-start': function (el) { fqStart(+el.getAttribute('data-no')); },
     'fq-show': function () { fqReveal(); },
     'fq-judge': function (el) { fqJudge(el.getAttribute('data-ok') === '1'); },
-    'fq-retry': function () { var T = FQ.s; fqBegin(T.no, W.shuffle(T.qs.filter(function (q) { return !q.ok; }))); },
+    'fq-retry': function () { var T = FQ.s; fqBegin(T.no, W.shuffle(T.qs.filter(function (q) { return !q.ok; })), { x: T.x, label: T.label }); },
+    'xq-set': function (el) {
+      var k = el.getAttribute('data-key'), v = el.getAttribute('data-val');
+      if (!(k in XQ)) return;
+      XQ[k] = k === 'order' ? v : v === 'true';
+      xqSave();
+      if (state.view === 'plus') renderPlus(XS.no, { keepScroll: true, quiet: true }); else renderPluses({ keepScroll: true, quiet: true });
+    },
+    'xq-start': function (el) { xqStart(+el.getAttribute('data-no') || 0); },
     'fq-quit': function () {
       var T = FQ.s, done = T ? T.qs.filter(function (q) { return q.done; }) : [];
-      if (!done.length) { var no = T ? T.no : 1; FQ.s = null; renderFt(no); return; }
+      if (!done.length) {
+        var no = T ? T.no : 1, x = T && T.x; FQ.s = null;
+        if (!x) renderFt(no); else if (no) renderPlus(no); else renderPluses();
+        return;
+      }
       T.qs = done; T.pos = done.length;
       renderFqDone();
     },
