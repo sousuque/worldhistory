@@ -1938,6 +1938,113 @@ details[open] > :not(summary) { animation: fold-in 0.28s var(--ease-out); }
 /* toast springs up */
 .toast { transform: translate(-50%, 28px); transition: opacity 0.25s, transform 0.45s var(--ease-spring); }
 
+/* =====================================================================
+   The day theme's ground: a pale sky (南国の空 thinned with 生成り, so the ember lettering still reads) at the top of the page running down into 生成り over one screen.
+   ===================================================================== */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) { --page-sky: linear-gradient(180deg, #B2CFD0, var(--kinari)); }
+}
+:root[data-theme="light"] { --page-sky: linear-gradient(180deg, #B2CFD0, var(--kinari)); }
+html { background: var(--page-sky, none) top / 100% 100vh no-repeat, var(--bg); }
+body { background: transparent; }
+
+/* =====================================================================
+   Opening. A wall with one open window in it, drawn as a single frame line. Through the window is the
+   page's own sky (a sunset running into 夜 on the night theme); the view leans in through the window
+   and the home screen is what is on the other side. The wall has a real hole in it, so what shows
+   through is the page itself. Only transform and opacity move, so it keeps going while the term data
+   unpacks. A tap or any key skips it; "reduce motion" never shows it.
+   ===================================================================== */
+:root {
+  --in-wall: #3A2D26;
+  --in-view: linear-gradient(180deg, #E8893A 0%, #B8501F 30%, #4A2A21 64%, var(--bg) 100%);
+  --in-line: rgb(242 232 213 / 88%);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) { --in-wall: #E4D7BD; --in-view: var(--page-sky); --in-line: rgb(26 21 18 / 82%); }
+}
+:root[data-theme="light"] { --in-wall: #E4D7BD; --in-view: var(--page-sky); --in-line: rgb(26 21 18 / 82%); }
+
+.intro {
+  --in-w: min(48vw, 36vh, 300px);          /* the window; everything else is measured from it */
+  --in-h: calc(var(--in-w) * 1.42);
+  --in-cy: 45%;                            /* where the window sits, and where the view leans in */
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  /* if the script never lets go, the wall still gives way to the page */
+  animation: in-out 0.6s linear 8s forwards;
+}
+.in-scene { position: absolute; inset: 0; transform-origin: 50% var(--in-cy); will-change: transform; }
+.in-scene > * { position: absolute; }
+.in-wall, .in-view, .in-win {
+  left: 50%;
+  top: var(--in-cy);
+  width: var(--in-w);
+  height: var(--in-h);
+  margin: calc(var(--in-h) / -2) 0 0 calc(var(--in-w) / -2);
+  border-radius: 42% / 30%;
+}
+/* the wall is the shadow of the hole: everything but the window */
+.in-wall { box-shadow: 0 0 0 300vmax var(--in-wall); }
+/* the sky in the window, until the page behind it is ready to be seen */
+.in-view { background: var(--in-view); }
+.in-win { border: 2px solid var(--in-line); animation: in-win 0.9s var(--ease-out) 0.15s both; }
+.in-cap {
+  left: 0;
+  right: 0;
+  top: calc(var(--in-cy) + var(--in-h) / 2 + clamp(20px, 5.5vh, 48px));
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.2;
+  text-align: center;
+  animation: in-cap 0.8s var(--ease-out) 0.5s both;
+}
+.in-kicker { font-size: 11px; font-weight: 500; letter-spacing: 0.42em; margin-right: -0.42em; color: var(--label); }
+.in-name { font-size: 22px; font-weight: 700; letter-spacing: 0.14em; margin-right: -0.14em; color: var(--ink); }
+
+@keyframes in-off { from { opacity: 1; } to { opacity: 0; } }
+@keyframes in-out { to { opacity: 0; visibility: hidden; } }
+/* leaving has keyframes of its own: reusing in-out would carry on the failsafe's clock and end at once */
+@keyframes in-leave { to { opacity: 0; visibility: hidden; } }
+@keyframes in-skip { to { opacity: 0; visibility: hidden; } }
+@keyframes in-win { from { opacity: 0; transform: scale(0.94); } }
+@keyframes in-cap { from { opacity: 0; transform: translateY(8px); } }
+/* the lean-in grows by ratio, not by pixels, so it reads as one steady move toward the window;
+   the script works the eight steps out from the size of the view (the defaults suit a phone) */
+@keyframes in-push {
+  12.5% { transform: scale(var(--in-s1, 1.07)); }
+  25% { transform: scale(var(--in-s2, 1.21)); }
+  37.5% { transform: scale(var(--in-s3, 1.42)); }
+  50% { transform: scale(var(--in-s4, 1.72)); }
+  62.5% { transform: scale(var(--in-s5, 2.13)); }
+  75% { transform: scale(var(--in-s6, 2.69)); }
+  87.5% { transform: scale(var(--in-s7, 3.49)); }
+  100% { transform: scale(var(--in-s8, 4.6)); }
+}
+
+/* leaving: the sky in the window clears to the page behind, and the view leans in through it */
+.intro.in-go { animation: in-leave 0.2s linear 1.1s forwards; }
+.intro.in-go .in-scene { animation: in-push 1.25s linear forwards; }
+.intro.in-go .in-view { animation: in-off 0.6s ease-in 0.3s forwards; }
+.intro.in-go .in-cap { animation: in-off 0.3s ease-in forwards; }
+.intro.in-skip { animation: in-skip 0.28s ease-out forwards; }
+/* opened in a background tab: hold the first frame until someone is looking */
+.intro.in-wait, .intro.in-wait * { animation-play-state: paused; }
+/* the logo's own sunrise waits for the sky to clear */
+.intro-on .brand-mark::before { animation-play-state: paused; }
+
+@media (prefers-reduced-motion: reduce) { .intro { display: none; } }
+@media print { .intro { display: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   .overview::before { animation: none; }
@@ -2012,6 +2119,102 @@ details[open] > :not(summary) { animation: fold-in 0.28s var(--ease-out); }
 
 </head>
 <body>
+<!-- 起動アニメーション: 壁に線だけの開いた窓がひとつ。壁には本当に穴があいていて、窓へズームインするとその向こうがホーム画面 -->
+<div class="intro" id="intro" aria-hidden="true">
+  <div class="in-scene">
+    <div class="in-wall"></div>
+    <div class="in-view"></div>
+    <div class="in-win"></div>
+    <p class="in-cap"><span class="in-kicker">世界史探究</span><span class="in-name">用語ドリル</span></p>
+  </div>
+</div>
+<script>
+/* The opening lets go when its first part has played and the first screen is drawn (WSDIntro.ready),
+   or after a few seconds whatever happens. A tap, a key or WSDIntro.skip ends it at once. */
+(function () {
+  'use strict';
+  var MIN = 1300, MAX = 6000;
+  var root = document.documentElement;
+  var el = document.getElementById('intro');
+  var waiting = [];
+  var api = window.WSDIntro = {
+    active: false,
+    ready: function () {},
+    skip: function () {},
+    /* run cb as the home screen starts to show through; at once if the opening is not playing */
+    onReveal: function (cb) { if (api.active) waiting.push(cb); else cb(); }
+  };
+  if (!el) return;
+  var reduce = false;
+  try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { /* old browser */ }
+  if (reduce) { el.parentNode.removeChild(el); return; }
+
+  var isReady = false, minDone = false, leaving = false, timers = [];
+  api.active = true;
+  root.classList.add('intro-on');
+
+  function later(fn, ms) { timers.push(setTimeout(fn, ms)); }
+  function reveal() {
+    if (!api.active) return;
+    api.active = false;
+    root.classList.remove('intro-on');
+    var list = waiting; waiting = [];
+    list.forEach(function (cb) { try { cb(); } catch (e) { /* the page still shows */ } });
+  }
+  function remove() {
+    reveal();
+    timers.forEach(clearTimeout);
+    document.removeEventListener('keydown', onKey, true);
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }
+  /* how far to lean in: until the window, rounded corners and all, covers the whole view */
+  function setPush() {
+    var g = el.querySelector('.in-win');
+    var r = g && g.getBoundingClientRect();
+    if (!r || !r.width || !r.height) return;
+    var s = Math.min(40, Math.max(3, Math.max(window.innerWidth / r.width, window.innerHeight / r.height) * 1.45));
+    for (var i = 1; i <= 8; i++) el.style.setProperty('--in-s' + i, Math.pow(s, Math.pow(i / 8, 1.5)).toFixed(3));
+  }
+  function leave(fast) {
+    if (leaving && !fast) return;
+    if (leaving && el.classList.contains('in-skip')) return;
+    leaving = true;
+    timers.forEach(clearTimeout); timers = [];
+    el.classList.remove('in-wait');
+    if (fast) { el.classList.add('in-skip'); reveal(); later(remove, 300); return; }
+    setPush();
+    el.classList.add('in-go');
+    later(reveal, 380);
+    later(remove, 1320);
+  }
+  function maybe() { if (isReady && minDone) leave(false); }
+  function onKey() { leave(true); }
+  api.ready = function () { isReady = true; maybe(); };
+  api.skip = function () { leave(true); };
+
+  function begin() {
+    later(function () { minDone = true; maybe(); }, MIN);
+    later(function () { leave(false); }, MAX);
+  }
+  el.addEventListener('pointerdown', function (e) { e.preventDefault(); leave(true); });
+  el.addEventListener('click', function () { leave(true); });
+  el.addEventListener('wheel', function (e) { e.preventDefault(); }, { passive: false });
+  el.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+  document.addEventListener('keydown', onKey, true);
+
+  if (document.visibilityState === 'hidden') {
+    el.classList.add('in-wait');
+    var seen = function () {
+      if (document.visibilityState === 'hidden') return;
+      document.removeEventListener('visibilitychange', seen);
+      if (leaving) return;
+      el.classList.remove('in-wait');
+      begin();
+    };
+    document.addEventListener('visibilitychange', seen);
+  } else begin();
+})();
+</script>
 <header class="topbar">
   <div class="topbar-in">
     <button type="button" class="brand" data-nav="home" aria-label="学習のホームへ">
@@ -4323,8 +4526,15 @@ var WSD = (function () {
   }
   /* a new screen: its top-level blocks rise in turn and the headline numbers count up.
      A screen that comes back scrolled down starts the turns at the first block in view */
+  var enterHeld = false;
   function enter() {
     if (reducedMotion()) return;
+    // under the opening the screen stands still; its entrance plays as the cabin clears
+    var intro = window.WSDIntro;
+    if (intro && intro.active) {
+      if (!enterHeld) { enterHeld = true; intro.onReveal(function () { enterHeld = false; enter(); }); }
+      return;
+    }
     var w = view.firstElementChild;
     if (!w) return;
     var k = 0, scrolled = window.scrollY > 0;
@@ -9094,6 +9304,7 @@ var WSD = (function () {
   function fatal(err) {
     view.innerHTML = '<div class="fatal"><h1 class="page-h">読み込めませんでした</h1><p>用語データを開けませんでした。ページを再読み込みしてください。直らない場合は、新しいブラウザ（Chrome・Edge・Safari・Firefox の最新版）で開いてください。</p><p class="note">' + esc(String(err && err.message || err)) + '</p></div>';
     setSync(canLocal ? 'local' : 'nostore');
+    try { if (window.WSDIntro) window.WSDIntro.skip(); } catch (e) { /* no opening */ }
   }
   function start(hot) {
     loadData().then(function (D) {
@@ -9129,6 +9340,7 @@ var WSD = (function () {
         renderFt(hot.fno); restored = true;
       }
       if (!restored) renderHome();
+      try { if (window.WSDIntro) { if (restored) window.WSDIntro.skip(); else window.WSDIntro.ready(); } } catch (e) { /* no opening */ }
       Cloud.onChange = function (changed) {
         if (!changed) return;
         if (state.view === 'home') renderHome({ keepScroll: true });
