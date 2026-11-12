@@ -5904,9 +5904,9 @@ var WSD = (function () {
     if (b) b.setAttribute('aria-pressed', String(S.revealed));
     pressKey('s');
   }
-  function flyOut(kind) {
+  function flyOut(kind, card) {
     if (reducedMotion()) return;
-    var el = $('#fcard'), layer = $('#fly-layer');
+    var el = card || $('#fcard'), layer = $('#fly-layer');
     if (!el || !layer) return;
     var r = el.getBoundingClientRect();
     if (r.bottom < 0 || r.top > window.innerHeight) return;
@@ -7868,10 +7868,11 @@ var WSD = (function () {
       '<p class="sess-n">問 <b>' + (T.pos + 1) + '</b> / ' + n + '</p></div>' +
       '<div class="tally"><span class="t-k">覚えた <b>' + T.qs.filter(function (x) { return x.ok === true; }).length + '</b></span>' +
       '<span class="t-n">まだ <b>' + T.qs.filter(function (x) { return x.ok === false; }).length + '</b></span></div>' +
-      '<article class="fcard qcard' + (open ? ' is-revealed' : reducedMotion() ? '' : ' enter') + '"><div class="fc-meta"><span class="cat">' + esc(v.cat) + '</span>' + (v.cls ? '<span class="cls">' + esc(v.cls) + '</span>' : '') + '</div>' +
+      '<article class="fcard qcard is-tappable' + (open ? ' is-revealed' : reducedMotion() ? '' : ' enter') + '"><div class="fc-meta"><span class="cat">' + esc(v.cat) + '</span>' + (v.cls ? '<span class="cls">' + esc(v.cls) + '</span>' : '') + '</div>' +
       '<p class="fc-prompt">' + esc(v.ask) + '</p>' +
       (v.body ? '<div class="lines"><p class="fc-ex">' + v.body + '</p></div>' : '') + (v.fig || '') +
-      (open ? '<p class="pe-ans" role="status">' + hlEsc(v.ans) + (v.star ? '<span class="pr-star" title="重要">★</span>' : '') + '</p>' : '') + '</article>';
+      (open ? '<p class="pe-ans" role="status">' + hlEsc(v.ans) + (v.star ? '<span class="pr-star" title="重要">★</span>' : '') + '</p>' : '') + '</article>' +
+      '<p class="kp-note">カードをタップで答えを表示、表示後に左右へスワイプで「まだ」「覚えた」。</p>';
     h += open ? '<div class="next-row pe-judge"><button type="button" class="btn" data-act="fq-judge" data-ok="0">まだ <kbd>A</kbd></button><button type="button" class="btn primary" data-act="fq-judge" data-ok="1">覚えた <kbd>D</kbd></button></div>'
       : '<div class="next-row"><button type="button" class="btn primary" data-act="fq-show">答えを見る <kbd>Space</kbd></button></div>';
     show(h + '</div>', { keepScroll: open, quiet: T.pos > 0 });
@@ -7884,6 +7885,7 @@ var WSD = (function () {
     if (q.x) { xqLoad(); XQR[q.key] = ok ? 1 : 0; xqSave(); }
     else { FQR[q.key] = ok ? 1 : 0; fqSave(); }
     bump(DAY_QA, 1);
+    flyOut(ok ? 'k' : 'n', $('.qcard'));
     FQ.s.pos++;
     renderFqSess();
   }
@@ -9316,14 +9318,23 @@ var WSD = (function () {
   /* touch: tap to flip, swipe left/right to judge */
   var swipe = null;
   view.addEventListener('pointerdown', function (e) {
-    if (state.view !== 'flash' || !e.target.closest('#fcard') || e.button > 0) return;
+    var fqS = state.view === 'fqSess';
+    if (!(state.view === 'flash' && e.target.closest('#fcard') || fqS && e.target.closest('.qcard')) || e.button > 0) return;
     swipe = { x: e.clientX, y: e.clientY, t: Date.now(), id: e.pointerId, type: e.pointerType, onCtl: !!e.target.closest('button, a, input, label') };
   });
   view.addEventListener('pointerup', function (e) {
     var s = swipe;
     swipe = null;
-    if (!s || e.pointerId !== s.id || state.view !== 'flash' || s.onCtl) return;
+    if (!s || e.pointerId !== s.id || s.onCtl) return;
     var dx = e.clientX - s.x, dy = e.clientY - s.y;
+    if (state.view === 'fqSess') {
+      var fq = fqCur();
+      if (!fq) return;
+      if (s.type !== 'mouse' && Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6) { if (fq.shown) fqJudge(dx > 0); return; }
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && Date.now() - s.t < 600 && !fq.shown && !(window.getSelection && String(window.getSelection()))) fqReveal();
+      return;
+    }
+    if (state.view !== 'flash') return;
     if (s.type !== 'mouse' && Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6) { judge(dx > 0 ? 'k' : 'n'); return; }
     if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && Date.now() - s.t < 600) {
       var sel = window.getSelection && String(window.getSelection());
